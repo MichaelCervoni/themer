@@ -17,7 +17,7 @@ export default defineConfig({
         options: "public/options.html",
       },
       output: {
-        entryFileNames: "[name].js", // Ensures output files match input names
+        entryFileNames: "[name].js",
       },
     },
   },
