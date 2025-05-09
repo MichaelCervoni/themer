@@ -12,7 +12,8 @@ const DEFAULTS: Settings = { style: "Original" };
 
 function Popup() {
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
-
+  const [status, setStatus] = useState<{loading: boolean; error?: string}>({loading: false});
+  
   // ── load current prefs ────────────────────────────────────────────
   useEffect(() => {
     browser.storage.local.get("settings").then((result) => {
@@ -22,16 +23,37 @@ function Popup() {
     });
   }, []);
 
-  // ── helpers ───────────────────────────────────────────────────────
   const saveAndApply = async () => {
-    await browser.storage.local.set({ settings });
-    // Send message to apply changes
-    await browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-      if (tabs[0]?.id) {
-        browser.tabs.sendMessage(tabs[0].id, { type: "REFRESH_PALETTE" });
+    try {
+      setStatus({loading: true});
+      
+      // Save settings
+      await browser.storage.local.set({ settings });
+      console.log("Saved settings:", settings);
+      
+      // Send message to apply changes
+      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tabs[0]?.id) {
+        throw new Error("No active tab found");
       }
-    });
-    window.close();
+      
+      const response = await browser.runtime.sendMessage({
+        type: "REFRESH_PALETTE",
+        settings
+      });
+      
+      console.log("Response from background:", response);
+      
+      if (!response.success) {
+        throw new Error(response.error || "Failed to apply palette");
+      }
+      
+      setStatus({loading: false});
+      // Only close if successful
+      window.close();
+    } catch (error) {
+      console.error("Error applying palette:", error);
+      setStatus({loading: false, error: (error as Error).message || "Failed to apply palette"});    }
   };
 
   const onSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -47,6 +69,7 @@ function Popup() {
           className="w-full border rounded p-1" 
           value={settings.style}
           onChange={onSelect}
+          disabled={status.loading}
         >
           <option value="Original">Original</option>
           <option value="Light">Light</option>
@@ -60,21 +83,34 @@ function Popup() {
           className="w-full border rounded p-1"
           rows={3}
           placeholder="Describe your palette (e.g. 'pastel sunset')"
-          value={settings.customDescription}
+          value={settings.customDescription || ""}
           onChange={(e) =>
             setSettings((s) => ({ ...s, customDescription: e.target.value }))
           }
+          disabled={status.loading}
         />
       )}
 
+      {status.error && (
+        <div className="text-red-500 text-xs p-2 bg-red-50 rounded border border-red-200">
+          Error: {status.error}
+        </div>
+      )}
+
       <button
-        className="w-full rounded bg-indigo-600 text-white py-1 hover:bg-indigo-700"
+        className={`w-full rounded py-1 ${
+          status.loading 
+            ? "bg-gray-400 text-white cursor-not-allowed" 
+            : "bg-indigo-600 text-white hover:bg-indigo-700"
+        }`}
         onClick={saveAndApply}
+        disabled={status.loading}
       >
-        Apply
+        {status.loading ? "Applying..." : "Apply"}
       </button>
     </div>
   );
 }
 
+// Render the component when the DOM is ready
 createRoot(document.getElementById("root")!).render(<Popup />);

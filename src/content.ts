@@ -2,6 +2,7 @@
 type ColorMap = Record<string, string>;
 
 console.log("Content script loaded at", new Date().toISOString());
+
 try {
   function collectColors(): string[] {
     const colors = new Set<string>();
@@ -18,7 +19,27 @@ try {
     return [...colors];
   }
 
-  // Send message with error handling
+  // Handle messages from background script
+  browser.runtime.onMessage.addListener((message) => {
+    console.log("Content script received message:", message);
+    
+    if (message.type === "GET_COLORS") {
+      const colors = collectColors();
+      console.log(`Collected ${colors.length} colors from page`);
+      return Promise.resolve({colors});
+    }
+    
+    if (message.type === "APPLY_MAP") {
+      console.log("Applying color map to page:", message.payload);
+      // Code to apply color map would go here
+      // This would interact with painter.ts or include that functionality
+      return Promise.resolve({success: true});
+    }
+    
+    return true;
+  });
+
+  // Initial message to background script
   browser.runtime.sendMessage({ 
     type: "COLOR_SET", 
     payload: collectColors() 
