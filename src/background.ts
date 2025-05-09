@@ -3,7 +3,7 @@ import type { ColorMap } from "./types";
 
 console.log("Background script loaded at", new Date().toISOString());
 
-// Set up message listener
+// Set up message listener with proper return values
 browser.runtime.onMessage.addListener((message, sender) => {
   console.log("Message received:", message);
   
@@ -16,10 +16,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === "REFRESH_PALETTE") {
     // Handle refreshing palette
     console.log("Refreshing palette with settings:", message.settings);
+    // For async responses, we need to return a promise
     return handleRefreshPalette(message.settings);
   }
   
-  return true;
+  // Default return for unhandled message types
+  return Promise.resolve({success: false, error: "Unknown message type"});
 });
 
 async function handleRefreshPalette(settings: any) {
@@ -61,9 +63,15 @@ async function handleRefreshPalette(settings: any) {
   }
 }
 
-const OLLAMA_URL = "http://localhost:11434/api/chat";
 async function fetchPalette(colors: string[], style: string, customDesc?: string): Promise<ColorMap> {
-  console.log(`Generating ${style} palette for ${colors.length} colors${customDesc ? ` with description: ${customDesc}` : ''}`);
+  // Get the provider and API settings
+  const settings = await browser.storage.local.get([
+    "provider", "ollamaUrl", "openaiKey", "claudeKey"
+  ]);
+  
+  // Default to ollama if no provider is set
+  const provider = settings.provider || "ollama";
+  console.log(`Using provider: ${provider}`);
   
   const prompt = `
     You are a color‑replacement assistant.
@@ -73,49 +81,203 @@ async function fetchPalette(colors: string[], style: string, customDesc?: string
     color (as given) to a hex replacement.
   `;
   
-  console.log("Sending prompt to LLM:", prompt);
+  console.log(`Sending prompt to ${provider}:`, prompt.substring(0, 100) + "...");
+  
+  // Choose the appropriate API based on the selected provider
+  switch(provider) {
+    case "openai":
+      return fetchFromOpenAI(colors, style, customDesc, settings.openaiKey, prompt);
+    case "claude":
+      return fetchFromClaude(colors, style, customDesc, settings.claudeKey, prompt);
+    case "ollama":
+    default:
+      return fetchFromOllama(colors, style, customDesc, settings.ollamaUrl, prompt);
+  }
+}
+
+// Implement separate functions for each provider
+async function fetchFromOllama(colors: string[], style: string, customDesc?: string, ollamaUrl?: string, prompt?: string): Promise<ColorMap> {
+  const OLLAMA_URL = ollamaUrl || "http://127.0.0.1:11434/api/chat";
   
   try {
-    // For Ollama
-    const response = await fetch(OLLAMA_URL, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        model: "mixtral",
+    console.log("Sending request to Ollama:", OLLAMA_URL);
+    
+    // Your existing Ollama implementation with XMLHttpRequest
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", OLLAMA_URL, true);
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.setRequestHeader("Accept", "application/json");
+      
+      // Rest of your XMLHttpRequest implementation...
+      xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            console.log("Raw LLM response:", data);
+            
+            const content = data.message?.content || "";
+            console.log("LLM content response:", content);
+            
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+              reject(new Error("Failed to parse color map from LLM response"));
+              return;
+            }
+            
+            const colorMap = JSON.parse(jsonMatch[0]);
+            resolve(colorMap);
+          } catch (e) {
+            reject(e);
+          }
+        } else {
+          reject(new Error(`Server returned status ${xhr.status}`));
+        }
+      };
+      
+      xhr.onerror = function() {
+        console.error("Network error details:", {
+          url: OLLAMA_URL,
+          readyState: xhr.readyState,
+          status: xhr.status,
+          statusText: xhr.statusText || "No status text"
+        });
+        
+        reject(new Error(`Network error occurred connecting to ${OLLAMA_URL}`));
+      };
+
+      xhr.timeout = 10000;
+      xhr.ontimeout = function() {
+        console.error("Request timed out after 10 seconds");
+        reject(new Error("Request to Ollama timed out"));
+      };
+
+      xhr.send(JSON.stringify({
+        model: "gemma3:12b",
         messages: [{"role": "user", "content": prompt}]
+      }));
+    });
+  } catch (error) {
+    console.error("Error in Ollama request:", error);
+    throw error;
+  }
+}
+
+async function fetchFromOpenAI(colors: string[], style: string, customDesc?: string, apiKey?: string, prompt?: string): Promise<ColorMap> {
+  if (!apiKey) {
+    throw new Error("OpenAI API key is required. Please set it in the options.");
+  }
+  
+  const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+  
+  try {
+    console.log("Sending request to OpenAI API");
+    
+    const response = await fetch(OPENAI_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini",
+        messages: [
+          {
+            "role": "user",
+            "content": prompt
+          }
+        ]
       })
     });
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("LLM API error:", errorText);
-      throw new Error(`API returned ${response.status}: ${errorText}`);
+      console.error("OpenAI API error:", errorText);
+      throw new Error(`OpenAI API returned ${response.status}: ${errorText}`);
     }
     
     const data = await response.json();
-    console.log("Raw LLM response:", data);
+    console.log("OpenAI response:", data);
     
-    // Extract the JSON from the response
-    const content = data.message?.content || "";
-    console.log("LLM content response:", content);
+    const content = data.choices?.[0]?.message?.content || "";
+    console.log("OpenAI content response:", content);
     
-    // Extract JSON object from the response
+    // Extract JSON from response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error("Failed to parse color map from LLM response");
+      throw new Error("Failed to parse color map from OpenAI response");
     }
     
-    const colorMap = JSON.parse(jsonMatch[0]);
-    return colorMap;
+    return JSON.parse(jsonMatch[0]);
   } catch (error) {
-    console.error("Error fetching palette:", error);
+    console.error("Error in OpenAI request:", error);
     throw error;
   }
 }
 
-browser.runtime.onMessage.addListener(async (msg, _sender) => {
-  if (msg.type !== "COLOR_SET") return;
-  const style = (await browser.storage.local.get("style")).style || "Light";
-  const map = await fetchPalette(msg.payload, style);
-  browser.tabs.sendMessage(_sender.tab!.id!, { type: "APPLY_MAP", payload: map });
+async function fetchFromClaude(colors: string[], style: string, customDesc?: string, apiKey?: string, prompt?: string): Promise<ColorMap> {
+  if (!apiKey) {
+    throw new Error("Claude API key is required. Please set it in the options.");
+  }
+  
+  const CLAUDE_URL = "https://api.anthropic.com/v1/messages";
+  
+  try {
+    console.log("Sending request to Claude API");
+    
+    const response = await fetch(CLAUDE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-3-sonnet-20240229",
+        max_tokens: 1000,
+        messages: [
+          {
+            "role": "user",
+            "content": prompt
+          }
+        ]
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Claude API error:", errorText);
+      throw new Error(`Claude API returned ${response.status}: ${errorText}`);
+    }
+    
+    const data = await response.json();
+    console.log("Claude response:", data);
+    
+    const content = data.content?.[0]?.text || "";
+    console.log("Claude content response:", content);
+    
+    // Extract JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Failed to parse color map from Claude response");
+    }
+    
+    return JSON.parse(jsonMatch[0]);
+  } catch (error) {
+    console.error("Error in Claude request:", error);
+    throw error;
+  }
+}
+
+// Add to background.ts
+browser.contextMenus.create({
+  id: "open-options",
+  title: "Color Rewriter Options",
+  contexts: ["browser_action"]
+});
+
+browser.contextMenus.onClicked.addListener((info) => {
+  if (info.menuItemId === "open-options") {
+    browser.runtime.openOptionsPage();
+  }
 });

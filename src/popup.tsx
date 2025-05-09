@@ -44,6 +44,11 @@ function Popup() {
       
       console.log("Response from background:", response);
       
+      // Add this check for undefined response
+      if (!response) {
+        throw new Error("No response from background script");
+      }
+      
       if (!response.success) {
         throw new Error(response.error || "Failed to apply palette");
       }
@@ -60,6 +65,10 @@ function Popup() {
     const style = e.target.value as Settings["style"];
     setSettings((s) => ({ ...s, style }));
   };
+
+  function openOptions() {
+    browser.runtime.openOptionsPage();
+  }
 
   return (
     <div className="p-3 text-sm space-y-3">
@@ -108,6 +117,15 @@ function Popup() {
       >
         {status.loading ? "Applying..." : "Apply"}
       </button>
+
+      <div className="text-xs text-center mt-3">
+        <button 
+          onClick={openOptions}
+          className="text-blue-600 hover:text-blue-800 hover:underline"
+        >
+          Options
+        </button>
+      </div>
     </div>
   );
 }

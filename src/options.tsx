@@ -29,6 +29,26 @@ function Options() {
     setTimeout(() => setSaved(false), 1500);
   };
 
+  const testConnection = async () => {
+    try {
+      // Show the URL we're testing
+      const settings = await browser.storage.local.get(["ollamaUrl"]);
+      const ollamaUrl = settings.ollamaUrl || "http://127.0.0.1:11434/api/chat";
+      console.log("Testing connection to:", ollamaUrl);
+      
+      const response = await fetch(ollamaUrl.replace("/chat", "/tags"), {
+        method: "GET"
+      });
+      
+      const text = await response.text();
+      console.log("Response:", text);
+      alert(`Connection successful! Response: ${text.substring(0, 100)}...`);
+    } catch (error) {
+      console.error("Connection test failed:", error);
+      alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   return (
     <form
       className="space-y-4"
@@ -70,6 +90,13 @@ function Options() {
               setState((s) => ({ ...s, ollamaUrl: e.target.value }))
             }
           />
+          <button 
+            type="button" 
+            onClick={testConnection}
+            className="bg-blue-500 text-white py-1 px-4 rounded mr-2"
+          >
+            Test Ollama Connection
+          </button>
         </div>
       )}
 

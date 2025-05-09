@@ -6,9 +6,9 @@
   "permissions": [
     "storage",
     "tabs",
+    "contextMenus",
     "http://localhost:11434/*",
-    "https://api.openai.com/*",
-    "https://api.anthropic.com/*"
+    "http://127.0.0.1:11434/*"
   ],
   "background": {
     "scripts": ["background.js"]
@@ -26,5 +26,9 @@
   "icons": {
     "48": "icons/48.png",
     "128": "icons/128.png"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "browser_style": true
   }
 }
