@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+      "target": "ES2022",           // modern JS output
+      "module": "ESNext",            // so Vite / esbuild can tree‑shake
+      "moduleResolution": "Node",
+      "lib": ["DOM", "ES2022"],      // browser + latest ES APIs
+      "jsx": "react-jsx",            // new JSX runtime
+      "strict": true,                 // 💯 enable all type‑safety flags
+      "skipLibCheck": true,           // faster builds
+      "esModuleInterop": true,
+      "forceConsistentCasingInFileNames": true,
+      "types": ["firefox-webext-browser"]
+    },
+    "include": ["src/**/*"]
+  }
