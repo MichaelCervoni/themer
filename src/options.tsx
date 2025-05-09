@@ -31,15 +31,21 @@ function Options() {
 
   const testConnection = async () => {
     try {
-      // Show the URL we're testing
-      const settings = await browser.storage.local.get(["ollamaUrl"]);
-      const ollamaUrl = settings.ollamaUrl || "http://127.0.0.1:11434/api/chat";
-      console.log("Testing connection to:", ollamaUrl);
+      // Use the current state for the URL, as that's what the user is configuring
+      const baseUrlToTest = state.ollamaUrl || "http://127.0.0.1:11434"; // Default if not set in state
+      // Ensure the base URL is clean and append /api/tags
+      const testUrl = `${baseUrlToTest.replace(/\/$/, '')}/api/tags`; 
       
-      const response = await fetch(ollamaUrl.replace("/chat", "/tags"), {
+      console.log("Testing connection to:", testUrl);
+      
+      const response = await fetch(testUrl, {
         method: "GET"
       });
       
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status} ${await response.text()}`);
+      }
+
       const text = await response.text();
       console.log("Response:", text);
       alert(`Connection successful! Response: ${text.substring(0, 100)}...`);
@@ -90,10 +96,13 @@ function Options() {
               setState((s) => ({ ...s, ollamaUrl: e.target.value }))
             }
           />
-          <button 
-            type="button" 
+          <div className="text-xs mt-1 text-gray-600">
+            Enter "debug" to use mock responses for testing. Example: http://127.0.0.1:11434
+          </div>
+          <button
+            type="button"
             onClick={testConnection}
-            className="bg-blue-500 text-white py-1 px-4 rounded mr-2"
+            className="mt-2 rounded bg-blue-500 text-white py-1 px-4 hover:bg-blue-600"
           >
             Test Ollama Connection
           </button>
