@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import "./styles.css";
 
 // Keys we keep in browser.storage.local
 interface Settings {
@@ -14,19 +15,22 @@ function Popup() {
 
   // ── load current prefs ────────────────────────────────────────────
   useEffect(() => {
-    browser.storage.local.get(["style", "customDescription"]).then((res) => {
-      setSettings({
-        style: (res.style as Settings["style"]) ?? "Original",
-        customDescription: res.customDescription ?? "",
-      });
+    browser.storage.local.get("settings").then((result) => {
+      if (result.settings) {
+        setSettings(result.settings);
+      }
     });
   }, []);
 
   // ── helpers ───────────────────────────────────────────────────────
   const saveAndApply = async () => {
-    await browser.storage.local.set(settings);
-    // ping background so it refreshes the palette
-    browser.runtime.sendMessage({ type: "REFRESH_PALETTE" });
+    await browser.storage.local.set({ settings });
+    // Send message to apply changes
+    await browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+      if (tabs[0]?.id) {
+        browser.tabs.sendMessage(tabs[0].id, { type: "REFRESH_PALETTE" });
+      }
+    });
     window.close();
   };
 
@@ -37,27 +41,25 @@ function Popup() {
 
   return (
     <div className="p-3 text-sm space-y-3">
-      <label className="block font-medium">Palette</label>
-      <select
-        className="w-full border rounded p-1"
-        value={settings.style}
-        onChange={onSelect}
-      >
-        {[
-          "Original",
-          "Light",
-          "Dark",
-          "Custom", // free‑text
-        ].map((m) => (
-          <option key={m}>{m}</option>
-        ))}
-      </select>
+      <div>
+        <label className="block mb-1">Palette</label>
+        <select 
+          className="w-full border rounded p-1" 
+          value={settings.style}
+          onChange={onSelect}
+        >
+          <option value="Original">Original</option>
+          <option value="Light">Light</option>
+          <option value="Dark">Dark</option>
+          <option value="Custom">Custom...</option>
+        </select>
+      </div>
 
       {settings.style === "Custom" && (
         <textarea
           className="w-full border rounded p-1"
           rows={3}
-          placeholder="Describe your palette (e.g. ‘pastel sunset’)"
+          placeholder="Describe your palette (e.g. 'pastel sunset')"
           value={settings.customDescription}
           onChange={(e) =>
             setSettings((s) => ({ ...s, customDescription: e.target.value }))

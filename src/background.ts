@@ -1,6 +1,22 @@
 // background.ts
 import type { ColorMap } from "./types";
 
+console.log("Background script loaded at", new Date().toISOString());
+
+// Set up message listener
+browser.runtime.onMessage.addListener((message, sender) => {
+  console.log("Message received:", message);
+  
+  if (message.type === "COLOR_SET") {
+    const colors = message.payload;
+    console.log(`Received ${colors.length} colors from content script`);
+    // Handle the colors
+    return Promise.resolve({success: true});
+  }
+  
+  return true;
+});
+
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 async function fetchPalette(colors: string[], style: string): Promise<ColorMap> {
   const prompt = `
