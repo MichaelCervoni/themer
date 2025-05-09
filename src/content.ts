@@ -24,63 +24,58 @@ try {
     const existingStyle = document.getElementById("color-rewriter-style");
     if (existingStyle) existingStyle.remove();
     
-    // Create a style element
-    const style = document.createElement("style");
-    style.id = "color-rewriter-style";
+    // Method 1: Create CSS Variables for the whole page
+    const rootStyle = document.createElement("style");
+    rootStyle.id = "color-rewriter-root-style";
+    rootStyle.textContent = `:root {
+      ${Object.entries(colorMap).map(([orig, replacement]) => 
+        `--cr-${orig.replace(/[^a-z0-9]/gi, '-')}: ${replacement};`
+      ).join('\n')}
+    }`;
+    document.head.appendChild(rootStyle);
     
-    // Generate CSS for each color pair
-    const cssRules: string[] = [];
-    
-    // Add rules for inline styles
-    Object.entries(colorMap).forEach(([original, replacement]) => {
-      // Target all common CSS properties that use colors
-      cssRules.push(`
-        [style*="color: ${original}"] { color: ${replacement} !important; }
-        [style*="background-color: ${original}"] { background-color: ${replacement} !important; }
-        [style*="border-color: ${original}"] { border-color: ${replacement} !important; }
-        [style*="box-shadow: ${original}"] { box-shadow: 0 0 5px ${replacement} !important; }
-      `);
-    });
-    
-    // Add a general CSS observer to catch dynamically applied styles
-    const cssObserverCode = `
-      (function() {
-        const colorMap = ${JSON.stringify(colorMap)};
+    // Method 2: Direct DOM element manipulation
+    function updateElementColors(element: Element) {
+      if (element instanceof HTMLElement) {
+        const style = window.getComputedStyle(element);
         
-        // Create a MutationObserver to watch for style changes
-        const observer = new MutationObserver((mutations) => {
-          mutations.forEach((mutation) => {
-            if (mutation.type === "attributes" && mutation.attributeName === "style") {
-              const element = mutation.target as HTMLElement;
-              const style = element.style;
-              
-              // Check and replace colors in computed styles
-              for (const [original, replacement] of Object.entries(colorMap)) {
-                if (style.color === original) style.color = replacement;
-                if (style.backgroundColor === original) style.backgroundColor = replacement;
-                if (style.borderColor === original) style.borderColor = replacement;
-              }
+        for (const [origColor, newColor] of Object.entries(colorMap)) {
+          if (style.color === origColor) {
+            element.style.setProperty('color', newColor, 'important');
+          }
+          if (style.backgroundColor === origColor) {
+            element.style.setProperty('background-color', newColor, 'important');
+          }
+          if (style.borderColor === origColor) {
+            element.style.setProperty('border-color', newColor, 'important');
+          }
+        }
+      }
+    }
+    
+    // Apply to existing elements
+    const elements = document.querySelectorAll('*');
+    elements.forEach(updateElementColors);
+    
+    // Setup observer for new elements
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          mutation.addedNodes.forEach((node) => {
+            if (node instanceof Element) {
+              updateElementColors(node);
+              const childElements = node.querySelectorAll('*');
+              childElements.forEach(updateElementColors);
             }
           });
-        });
-        
-        // Start observing
-        observer.observe(document.body, {
-          attributes: true,
-          attributeFilter: ["style"],
-          subtree: true
-        });
-      })();
-    `;
+        }
+      }
+    });
     
-    // Add the CSS rules to the style element
-    style.textContent = cssRules.join("\n");
-    document.head.appendChild(style);
-    
-    // Add the observer script
-    const script = document.createElement("script");
-    script.textContent = cssObserverCode;
-    document.head.appendChild(script);
+    observer.observe(document.body, { 
+      childList: true,
+      subtree: true
+    });
     
     console.log(`Applied ${Object.keys(colorMap).length} color replacements to the page`);
   }

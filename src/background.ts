@@ -44,6 +44,15 @@ async function handleRefreshPalette(settings: any) {
       } else {
         colorMap = await fetchPalette(response.colors, settings.style, settings.customDescription);
         console.log("Generated palette:", colorMap);
+        
+        // Apply any color overrides
+        if (settings.colorOverrides) {
+          colorMap = { ...colorMap, ...settings.colorOverrides };
+          console.log("Palette with overrides:", colorMap);
+        }
+        
+        // Save the current palette for the popup to display
+        await browser.storage.local.set({ currentPalette: colorMap });
       }
     } catch (error) {
       console.error("Error generating palette:", error);
