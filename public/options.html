@@ -8,8 +8,29 @@
   <body>
     <div id="root"></div>
     <script type="module" src="./options.js"></script>
-    <button type="button" onClick={testConnection}>
-      Test Ollama Connection
-    </button>
+    <!-- Add a fallback in case React fails to render -->
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        // Check if React has rendered anything after a short delay
+        setTimeout(() => {
+          const root = document.getElementById('root');
+          if (!root || !root.hasChildNodes()) {
+            console.error('Options failed to render properly. Creating fallback UI.');
+            root.innerHTML = `
+              <div style="padding: 16px; text-align: center;">
+                <h3>Color Rewriter Options</h3>
+                <p>There was an issue loading the options interface.</p>
+                <button id="reload-button" style="padding: 8px 16px; background-color: #4a5568; color: white; border-radius: 4px;">
+                  Reload Page
+                </button>
+              </div>
+            `;
+            document.getElementById('reload-button')?.addEventListener('click', () => {
+              window.location.reload();
+            });
+          }
+        }, 1000);
+      });
+    </script>
   </body>
 </html>

@@ -23,12 +23,10 @@ export default defineConfig({
     // Prevent Vite’s CommonJS plugin from trying to compile scheduler’s .ts
     commonjsOptions: {
       exclude: [/node_modules\/scheduler/]
-    },
-
-    rollupOptions: {
+    },    rollupOptions: {
       input: {
-        popup:     resolve(__dirname, "src/popup.tsx"),
-        options:   resolve(__dirname, "src/options.tsx"),
+        popup:     resolve(__dirname, "src/popup-new.tsx"),
+        options:   resolve(__dirname, "src/options-new.tsx"),
         background:resolve(__dirname, "src/background.ts"),
         content:   resolve(__dirname, "src/content.ts")
       },

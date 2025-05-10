@@ -1,31 +1,39 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Color Rewriter",
+  "description": "Change the colors of any website using AI",
   "version": "0.1.0",
-  "description": "Swap site colors with AI‑generated palettes",  "permissions": [
+  "permissions": [
+    "activeTab", 
+    "tabs", 
     "storage",
-    "tabs",
-    "contextMenus",
-    "http://localhost:11434/*",
-    "http://127.0.0.1:11434/*",
-    "webRequestBlocking",
-    "webRequest"
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
+      "js": ["content.js"]
     }
   ],
-  "browser_action": {
-    "default_popup": "popup.html"
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Color Rewriter"
   },
   "options_ui": {
     "page": "options.html",
-    "browser_style": true
-  }
+    "open_in_tab": true
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["*.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

@@ -155,3 +155,58 @@ export function findBestModel(availableModels: string[]): string {
   // If none of our preferred models are available, return the first available model
   return availableModels[0];
 }
+
+/**
+ * Fetch available models from Ollama
+ */
+export async function fetchOllamaModels(baseUrl: string): Promise<string[]> {
+  try {
+    const result = await checkOllamaAvailability(baseUrl);
+    if (result.available && result.models) {
+      return result.models;
+    }
+    return [];
+  } catch (error) {
+    console.error("Error fetching Ollama models:", error);
+    return [];
+  }
+}
+
+/**
+ * Run a network diagnostic to check connectivity to Ollama
+ */
+export async function runOllamaDiagnostics(baseUrl: string): Promise<{
+  success: boolean;
+  diagnostics: Record<string, any>;
+  message: string;
+}> {
+  try {
+    const results = await browser.runtime.sendMessage({
+      type: "NETWORK_DIAGNOSTICS",
+      url: baseUrl
+    });
+
+    if (results.tests && (
+        (results.tests.directFetch && results.tests.directFetch.success) || 
+        (results.tests.alternateHost && results.tests.alternateHost.success)
+      )) {
+      return {
+        success: true,
+        diagnostics: results,
+        message: "Connection successful. Ollama appears to be running and accessible."
+      };
+    } else {
+      return {
+        success: false,
+        diagnostics: results,
+        message: "Connection failed. Please make sure Ollama is running."
+      };
+    }
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: { error: String(error) },
+      message: `Error running diagnostics: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+}
