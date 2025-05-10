@@ -2,13 +2,14 @@
   "manifest_version": 2,
   "name": "Color Rewriter",
   "version": "0.1.0",
-  "description": "Swap site colors with AI‑generated palettes",
-  "permissions": [
+  "description": "Swap site colors with AI‑generated palettes",  "permissions": [
     "storage",
     "tabs",
     "contextMenus",
     "http://localhost:11434/*",
-    "http://127.0.0.1:11434/*"
+    "http://127.0.0.1:11434/*",
+    "webRequestBlocking",
+    "webRequest"
   ],
   "background": {
     "scripts": ["background.js"]
@@ -22,10 +23,6 @@
   ],
   "browser_action": {
     "default_popup": "popup.html"
-  },
-  "icons": {
-    "48": "icons/48.png",
-    "128": "icons/128.png"
   },
   "options_ui": {
     "page": "options.html",

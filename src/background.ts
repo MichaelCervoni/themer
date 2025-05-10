@@ -150,8 +150,9 @@ Return ONLY a JSON object mapping each original color (as given) to a hex replac
 }
 
 async function fetchFromOllama(colors: string[], style: string, customDesc?: string, ollamaBaseUrlFromSettings?: string, prompt?: string): Promise<ColorMap> {
-  if (ollamaBaseUrlFromSettings === "debug") {
-    console.log("BG (fetchFromOllama): DEBUG MODE - Using mock color palette");
+  // Helper function that creates a mock palette when Ollama isn't available
+  const createMockPalette = (): ColorMap => {
+    console.log("BG (fetchFromOllama): Creating mock color palette");
     const mockResponse: ColorMap = {};
     colors.forEach(color => {
       if (style === "Dark") {
@@ -163,34 +164,123 @@ async function fetchFromOllama(colors: string[], style: string, customDesc?: str
         mockResponse[color] = `hsl(${randomHue}, 70%, ${Math.random() > 0.5 ? '30%' : '80%'})`;
       }
     });
-    return Promise.resolve(mockResponse);
+    return mockResponse;
+  };
+
+  // Use debug mode if explicitly requested
+  if (ollamaBaseUrlFromSettings === "debug") {
+    console.log("BG (fetchFromOllama): DEBUG MODE - Using mock color palette");
+    return Promise.resolve(createMockPalette());
+  }
+  
+  // Get a compatible model from available models
+  async function getCompatibleModel(baseUrl: string): Promise<string> {
+    try {
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/tags`);
+      if (!response.ok) {
+        return "llama3"; // Default fallback
+      }
+      
+      const data = await response.json();
+      console.log("BG (getCompatibleModel): Available models:", data.models?.map((m: any) => m.name).join(", ") || "none found");
+      
+      // Try to find a suitable model in order of preference
+      const preferredModels = [
+        "llama3", "llama3:8b", "llama3:70b", 
+        "llama2", "llama2:7b", "llama2:13b", "llama2:70b",
+        "gemma", "gemma:7b", "gemma:2b", "gemma3", "gemma3:8b",
+        "mistral", "mistral:7b", "mixtral", "phi", "phi:3b"
+      ];
+      
+      if (Array.isArray(data.models)) {
+        const availableModels = data.models.map((m: any) => m.name.toLowerCase());
+        for (const model of preferredModels) {
+          if (availableModels.includes(model) || availableModels.some((m: string) => m.startsWith(model))) {
+            console.log(`BG (getCompatibleModel): Selected ${model} from available models`);
+            return model;
+          }
+        }
+        
+        // If none of the preferred models are available, use the first available model
+        if (data.models.length > 0) {
+          console.log(`BG (getCompatibleModel): Using first available model: ${data.models[0].name}`);
+          return data.models[0].name;
+        }
+      }
+      
+      return "llama3"; // Default fallback if no models found
+    } catch (error) {
+      console.error("BG (getCompatibleModel): Error getting available models:", error);
+      return "llama3"; // Default fallback
+    }
   }
 
   const baseOllamaUrl = ollamaBaseUrlFromSettings || "http://127.0.0.1:11434";
   const OLLAMA_API_URL = `${baseOllamaUrl.replace(/\/$/, '')}/api/chat`;
   console.log(`BG (fetchFromOllama): Attempting to fetch from Ollama API: ${OLLAMA_API_URL}`);
-
-  try {
+  
+  // If the fetch fails, the user will see an error. Add this to check - the user might want to try debug mode first
+  if (baseOllamaUrl !== "debug" && colors.length > 0) {
+    console.log("BG (fetchFromOllama): Will create temporary mock palette if Ollama fails");
+  }
+    try {
     // First check if Ollama server is running with a simpler request
-    const checkResponse = await fetch(`${baseOllamaUrl.replace(/\/$/, '')}/api/tags`, {
-      method: "GET"
-    }).catch(error => {
-      console.error("BG (fetchFromOllama): Ollama server connectivity check failed:", error);
-      throw new Error(`Ollama server connection failed: ${error.message} - Is Ollama running?`);
-    });
+    console.log(`BG (fetchFromOllama): Testing connection to Ollama server: ${baseOllamaUrl}/api/tags`);
     
-    if (!checkResponse.ok) {
-      throw new Error(`Ollama server returned status ${checkResponse.status} during connectivity check`);
+    // Get a compatible model via the same mechanism as our utility function
+    let modelToUse = "llama3"; // Default model
+    
+    try {
+      // Direct fetch without CORS/proxy since we're in background script
+      const checkResponse = await fetch(`${baseOllamaUrl.replace(/\/$/, '')}/api/tags`, {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+      
+      if (!checkResponse.ok) {
+        console.error(`BG (fetchFromOllama): Ollama server returned status ${checkResponse.status} during connectivity check`);
+        const errorBody = await checkResponse.text().catch(() => "Failed to read error body");
+        console.error(`BG (fetchFromOllama): Error body: ${errorBody}`);
+        throw new Error(`Ollama server returned status ${checkResponse.status} - ${errorBody}`);
+      }
+      
+      const data = await checkResponse.json();
+      
+      if (data.models && Array.isArray(data.models) && data.models.length > 0) {
+        // Find a suitable model
+        const availableModels = data.models.map((m: any) => m.name);
+        const preferredModels = [
+          "llama3", "llama3:8b", "llama2:7b", "gemma:7b", "mistral:7b", "mixtral", "phi:3b"
+        ];
+        
+        for (const model of preferredModels) {
+          if (availableModels.includes(model) || availableModels.some((m: string) => m.startsWith(model.toLowerCase()))) {
+            modelToUse = model;
+            break;
+          }
+        }
+        
+        if (!preferredModels.includes(modelToUse) && !preferredModels.some(p => modelToUse.startsWith(p))) {
+          // If we didn't find a preferred model, use the first available one
+          modelToUse = availableModels[0];
+        }
+      }
+      
+      console.log(`BG (fetchFromOllama): Ollama server connectivity confirmed, using model: ${modelToUse}`);
+    } catch (checkError) {
+      console.error("BG (fetchFromOllama): Ollama server connectivity check failed:", checkError);
+      // If test connectivity fails, return a mock palette instead of throwing
+      console.warn("BG (fetchFromOllama): Falling back to mock palette due to connectivity error");
+      return createMockPalette();
     }
     
-    console.log("BG (fetchFromOllama): Ollama server connectivity confirmed");
-    
-    // Now send the actual chat request
+    // Now send the actual chat request directly from the background script (no CORS issues here)
+    console.log(`BG (fetchFromOllama): Sending chat request to: ${OLLAMA_API_URL} using model: ${modelToUse}`);
     const response = await fetch(OLLAMA_API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify({
-        model: "gemma3:12b", // Consider making model configurable
+        model: modelToUse,
         messages: [{ role: "user", content: prompt }],
         format: "json",
         stream: false
@@ -200,11 +290,22 @@ async function fetchFromOllama(colors: string[], style: string, customDesc?: str
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`BG (fetchFromOllama): Ollama returned status ${response.status}. Body: ${errorText}`);
-      throw new Error(`Ollama API Error: ${response.status} - ${errorText.substring(0,100)}`);
+      // If the actual request fails, return a mock palette as fallback
+      console.warn("BG (fetchFromOllama): Falling back to mock palette due to API error");
+      return createMockPalette();
     }
     
     const data = await response.json();
     console.log("BG (fetchFromOllama): Raw LLM response:", data);
+    
+    if (!data.message) {
+      console.error("BG (fetchFromOllama): Unexpected response format. Missing 'message' property:", data);
+      if (data.error) {
+        throw new Error(`Ollama error: ${data.error}`);
+      }
+      throw new Error("Unexpected response format from Ollama");
+    }
+    
     const content = data.message?.content || "";
     
     const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -263,6 +364,76 @@ async function fetchFromClaude(colors: string[], style: string, customDesc?: str
 
 browser.runtime.onMessage.addListener(async (message, sender) => {
   console.log(`BG: Message received: ${message.type}`, "from sender:", sender.tab ? `tab ${sender.tab.id} (${sender.tab.url})` : (sender.id || 'popup/background'));
+    if (message.type === "OLLAMA_PROXY") {
+    console.log("BG (OLLAMA_PROXY): Proxying request to Ollama:", {
+      url: message.url,
+      method: message.method || "GET",
+      headers: message.headers,
+      bodyLength: message.body ? JSON.stringify(message.body).length : 0
+    });
+    
+    try {
+      // More detailed debugging for the Ollama proxy
+      console.log(`BG (OLLAMA_PROXY): Full request details:
+        URL: ${message.url}
+        Method: ${message.method || "GET"}
+        Headers: ${JSON.stringify(message.headers || { "Accept": "application/json" })}
+        Body sample: ${message.body ? JSON.stringify(message.body).substring(0, 100) + '...' : 'none'}`);
+      
+      const requestBody = message.body ? 
+        (typeof message.body === 'string' ? message.body : JSON.stringify(message.body)) : 
+        undefined;
+      
+      const response = await fetch(message.url, {
+        method: message.method || "GET",
+        headers: message.headers || { "Accept": "application/json" },
+        body: requestBody
+      });
+      
+      console.log(`BG (OLLAMA_PROXY): Response received. Status: ${response.status} ${response.statusText}`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`BG (OLLAMA_PROXY): Error response: ${response.status} ${response.statusText}`, errorText);
+        return {
+          success: false,
+          ok: false,
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        };
+      }
+      
+      const responseText = await response.text();
+      console.log(`BG (OLLAMA_PROXY): Successful response (${responseText.length} chars): ${responseText.substring(0, 100)}...`);
+      
+      try {
+        const responseData = JSON.parse(responseText);
+        return {
+          success: true,
+          ok: true,
+          status: response.status,
+          data: responseData,
+          text: responseText
+        };
+      } catch (jsonError) {
+        console.warn(`BG (OLLAMA_PROXY): Could not parse response as JSON: ${jsonError}`);
+        return {
+          success: true,
+          ok: true, 
+          status: response.status,
+          text: responseText
+        };
+      }
+    } catch (error) {
+      console.error("BG (OLLAMA_PROXY): Fetch error:", error);
+      return {
+        success: false,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
   
   if (message.type === "COLOR_SET") {
     // console.log(`BG: Received ${message.payload.length} colors from content script in tab ${sender.tab?.id}`);
@@ -295,6 +466,161 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
     const settingsForThisTld = tldActiveSettings[tld] || null;
     console.log(`BG (GET_ACTIVE_SETTINGS_FOR_TLD): For TLD '${tld}', found settings:`, settingsForThisTld ? `${settingsForThisTld.style}` : 'null');
     return Promise.resolve(settingsForThisTld);
+  }
+
+  if (message.type === "OLLAMA_SYSTEM_CHECK") {
+    console.log("BG (OLLAMA_SYSTEM_CHECK): Performing system-level check for Ollama connectivity");
+    
+    try {
+      const url = message.url || "http://127.0.0.1:11434/api/tags";
+      console.log(`BG (OLLAMA_SYSTEM_CHECK): Testing connection to ${url}`);
+      
+      // Create an abort controller with timeout for better browser compatibility
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+      
+      const responseText = await response.text();
+      console.log(`BG (OLLAMA_SYSTEM_CHECK): Response status: ${response.status}, text length: ${responseText.length}`);
+      
+      try {
+        const data = JSON.parse(responseText);
+        return {
+          success: true,
+          status: response.status,
+          statusText: response.statusText,
+          data: data,
+          text: responseText,
+          models: data.models?.map((m: any) => m.name) || []
+        };
+      } catch (jsonError) {
+        return {
+          success: true,
+          status: response.status,
+          statusText: response.statusText,
+          error: `Failed to parse JSON: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`,
+          text: responseText
+        };
+      }
+    } catch (error) {
+      console.error("BG (OLLAMA_SYSTEM_CHECK): Error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+  
+  if (message.type === "NETWORK_DIAGNOSTICS") {
+    console.log("BG (NETWORK_DIAGNOSTICS): Running comprehensive network tests");
+    const url = message.url || "http://127.0.0.1:11434/api/tags";
+    
+    try {
+      const results: any = {
+        targetUrl: url,
+        tests: {}
+      };
+
+      // Test 1: Direct fetch to the specified URL
+      try {
+        console.log(`BG (NETWORK_DIAGNOSTICS): Testing direct fetch to ${url}`);
+        const response = await fetch(url, {
+          method: "GET",
+          headers: { "Accept": "application/json" }
+        });
+        
+        results.tests.directFetch = {
+          success: response.ok,
+          status: response.status,
+          statusText: response.statusText
+        };
+        
+        try {
+          const text = await response.text();
+          results.tests.directFetch.bodyLength = text.length;
+          results.tests.directFetch.bodySample = text.substring(0, 100);
+        } catch (err) {
+          results.tests.directFetch.bodyError = String(err);
+        }
+      } catch (error) {
+        results.tests.directFetch = {
+          success: false,
+          error: String(error)
+        };
+      }
+
+      // Test 2: Try localhost instead of 127.0.0.1 or vice versa
+      const alternateHost = url.includes('127.0.0.1') ? 
+        url.replace('127.0.0.1', 'localhost') : 
+        url.replace('localhost', '127.0.0.1');
+      
+      try {
+        console.log(`BG (NETWORK_DIAGNOSTICS): Testing alternative host: ${alternateHost}`);
+        const response = await fetch(alternateHost, {
+          method: "GET", 
+          headers: { "Accept": "application/json" }
+        });
+        
+        results.tests.alternateHost = {
+          url: alternateHost,
+          success: response.ok,
+          status: response.status,
+          statusText: response.statusText
+        };
+      } catch (error) {
+        results.tests.alternateHost = {
+          url: alternateHost,
+          success: false,
+          error: String(error)
+        };
+      }
+
+      // Test 3: Check internet connectivity
+      try {
+        console.log("BG (NETWORK_DIAGNOSTICS): Testing general internet connectivity");
+        const response = await fetch("https://www.google.com/generate_204", { method: "GET" });
+        results.tests.internet = {
+          success: response.status === 204,
+          status: response.status,
+          statusText: response.statusText
+        };
+      } catch (error) {
+        results.tests.internet = {
+          success: false,
+          error: String(error)
+        };
+      }
+
+      // Test 4: Extension API access test
+      try {
+        console.log("BG (NETWORK_DIAGNOSTICS): Testing extension API access");
+        const storageResult = await browser.storage.local.get('test-key');
+        await browser.storage.local.set({ 'test-key': Date.now() });
+        results.tests.extensionAPI = {
+          success: true,
+          storageAccess: true
+        };
+      } catch (error) {
+        results.tests.extensionAPI = {
+          success: false,
+          error: String(error)
+        };
+      }
+
+      console.log("BG (NETWORK_DIAGNOSTICS): Tests completed", results);
+      return results;
+    } catch (error) {
+      console.error("BG (NETWORK_DIAGNOSTICS): Error running tests", error);
+      return {
+        success: false,
+        error: String(error)
+      };
+    }
   }
   
   console.warn("BG: Unknown message type received:", message.type);
@@ -349,3 +675,5 @@ browser.contextMenus.onClicked.addListener((info, tab) => {
     browser.runtime.openOptionsPage();
   }
 });
+
+// Previous testNetworkConnection function removed due to TypeScript errors

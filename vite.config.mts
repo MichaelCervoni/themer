@@ -3,13 +3,12 @@ import { viteStaticCopy } from "vite-plugin-static-copy";
 import { resolve } from "path";
 import checker from 'vite-plugin-checker';
 
-export default defineConfig({
-  plugins: [
+export default defineConfig({  plugins: [
     viteStaticCopy({
       targets: [
         { src: "manifest.json", dest: "." },
         { src: "public/*.html", dest: "." },
-        // { src: "icons", dest: "." }, // Enable if you have icons
+        // Remove the icons line since the directory doesn't exist
       ],
     }),
     checker({ typescript: true }),
@@ -21,6 +20,7 @@ export default defineConfig({
         options: resolve(__dirname, "src/options.tsx"),
         background: resolve(__dirname, "src/background.ts"),
         content: resolve(__dirname, "src/content.ts")
+        // painter.ts is intentionally excluded as we use content.ts approach
       },
       output: {
         entryFileNames: "[name].js",
