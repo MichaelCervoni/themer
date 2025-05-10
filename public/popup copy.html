@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Color Rewriter</title>
+    <style>
+      body {
+        width: 280px; /* Slightly wider for better display */
+        margin: 0;
+        font-family: system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>    <script type="module" src="./popup.js"></script>
+    <!-- Add a fallback in case React fails to render -->
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        // Check if React has rendered anything after a short delay
+        setTimeout(() => {
+          const root = document.getElementById('root');
+          if (!root || !root.hasChildNodes()) {
+            console.error('Popup failed to render properly. Creating fallback UI.');
+            root.innerHTML = `
+              <div style="padding: 16px; text-align: center;">
+                <h3>Color Rewriter</h3>
+                <p>There was an issue loading the popup interface.</p>
+                <button id="options-fallback">Open Options</button>
+              </div>
+            `;
+            document.getElementById('options-fallback')?.addEventListener('click', () => {
+              browser.runtime.openOptionsPage();
+            });
+          }
+        }, 500);
+      });
+    </script>
+  </body>
+</html>

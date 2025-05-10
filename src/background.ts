@@ -85,7 +85,8 @@ async function handleRefreshPalette(settings: any, tab: browser.tabs.Tab): Promi
     }
     
     let colorMap: ColorMap;
-    const paletteCacheKey = getPaletteCacheKey(settings.style, settings.customDescription);    if (savedPalettesByTld[tld]?.[paletteCacheKey]) {
+    const paletteCacheKey = getPaletteCacheKey(settings.style, settings.customDescription);    
+    if (savedPalettesByTld[tld]?.[paletteCacheKey]) {
       console.log(`BG (handleRefreshPalette): Using saved palette for TLD ${tld}, Key: ${paletteCacheKey}`);
       colorMap = savedPalettesByTld[tld][paletteCacheKey];
       
@@ -379,9 +380,9 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
   }
 
   if (message.type === "GET_ACTIVE_SETTINGS_FOR_TLD") {
-    const urlForTld = sender.tab?.url; 
+    const urlForTld = sender.tab?.url || message.url; 
     if (!urlForTld) {
-      console.error("BG (GET_ACTIVE_SETTINGS_FOR_TLD): Sender tab URL is missing.");
+      console.error("BG (GET_ACTIVE_SETTINGS_FOR_TLD): URL is missing.");
       return Promise.resolve(null);
     }
     const tld = getTld(urlForTld);

@@ -1,11 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Color Rewriter",
+  "name": "Color Rewriter (No CSP)",
   "version": "0.1.0",
   "description": "Change the colors of any website using AI",
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
-  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Color Rewriter"
@@ -27,11 +24,5 @@
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["*.css"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

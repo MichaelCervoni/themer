@@ -1,3 +1,4 @@
+// filepath: c:\Users\Micha\Documents\Themer\src\popup-new.tsx
 import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { ColorMap } from "./types";
@@ -5,6 +6,7 @@ import "./styles.css";
 
 // Add debugging
 console.log("Popup script started loading");
+
 // Add error boundary to catch rendering errors
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error?: Error}> {
   constructor(props: {children: React.ReactNode}) {

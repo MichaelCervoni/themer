@@ -1,41 +1,42 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Color Rewriter</title>
-    <style>
-      body {
-        width: 280px; /* Slightly wider for better display */
-        margin: 0;
-        font-family: system-ui, sans-serif;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="./popup.js"></script>
-    <!-- Add a fallback in case React fails to render -->
-    <script>
-      window.addEventListener('DOMContentLoaded', () => {
-        // Check if React has rendered anything after a short delay
-        setTimeout(() => {
-          const root = document.getElementById('root');
-          if (!root || !root.hasChildNodes()) {
-            console.error('Popup failed to render properly. Creating fallback UI.');
-            root.innerHTML = `
-              <div style="padding: 16px; text-align: center;">
-                <h3>Color Rewriter</h3>
-                <p>There was an issue loading the popup interface.</p>
-                <button id="options-fallback">Open Options</button>
-              </div>
-            `;
-            document.getElementById('options-fallback')?.addEventListener('click', () => {
-              browser.runtime.openOptionsPage();
-            });
-          }
-        }, 500);
-      });
-    </script>
-  </body>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Color Rewriter</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 16px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    button {
+      margin: 8px 0;
+      padding: 8px 16px;
+      background: #4169e1;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <h2>Color Rewriter</h2>
+  <p>Basic functionality for testing</p>
+  
+  <select id="theme-select">
+    <option value="Dark">Dark Theme</option>
+    <option value="Light">Light Theme</option>
+    <option value="Solarized">Solarized</option>
+  </select>
+  
+  <button id="apply-btn">Apply Theme</button>
+  <button id="options-btn">Options</button>
+  
+  <div id="message" style="margin-top: 16px; font-weight: bold;"></div>
+  
+  <script src="popup-simple.js"></script>
+</body>
 </html>

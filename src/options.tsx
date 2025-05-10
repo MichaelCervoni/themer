@@ -184,20 +184,32 @@ function Options() {
       alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
+
   const runNetworkDiagnostics = async () => {
     try {
       const baseUrl = state.ollamaUrl || "http://127.0.0.1:11434";
       
       alert("Running network diagnostics. This may take a moment...");
+        // Handle the diagnostics directly with the background script
+      const diagnosticResult = await browser.runtime.sendMessage({
+        type: "NETWORK_DIAGNOSTICS",
+        url: baseUrl
+      });
       
-      // Import the diagnostics function dynamically to avoid circular dependencies
-      const { runNetworkDiagnostics } = await import('./utils/network-diagnostics');
-      const diagnosticResult = await runNetworkDiagnostics(baseUrl);
+      // Process the results
+      const success = !!(diagnosticResult.tests?.directFetch?.success || 
+                         diagnosticResult.tests?.alternateHost?.success);
       
-      if (diagnosticResult.success) {
-        alert("Connection successful!\n\n" + diagnosticResult.summary + "\n\nIf you're still having issues, check that you have models installed with 'ollama pull llama3'.");
+      const summary = success
+        ? "Connection to Ollama server was successful. Server is reachable."
+        : "Failed to connect to Ollama server. Please check:\n" +
+          "1. Is Ollama running? Run 'ollama serve' in terminal.\n" +
+          "2. Try using http://localhost:11434 or http://127.0.0.1:11434\n" +
+          "3. Check if there's a firewall blocking the connection.";
+        if (success) {
+        alert("Connection successful!\n\n" + summary + "\n\nIf you're still having issues, check that you have models installed with 'ollama pull llama3'.");
       } else {
-        alert("Connection failed: \n\n" + diagnosticResult.summary);
+        alert("Connection failed: \n\n" + summary);
       }
     } catch (error) {
       alert("Error running diagnostics: " + (error instanceof Error ? error.message : String(error)));
