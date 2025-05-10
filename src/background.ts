@@ -10,21 +10,6 @@ const STORAGE_KEYS = {
   CURRENT_PALETTE: "currentPalette"
 };
 
-type TrackedStyleProperties = {
-  color?: string;
-  backgroundColor?: string;
-  borderColor?: string;
-  borderTopColor?: string;
-  borderRightColor?: string;
-  borderBottomColor?: string;
-  borderLeftColor?: string;
-  // Add any other properties you might track here
-};
-
-const originalInlineStyles = new Map<HTMLElement, TrackedStyleProperties>();
-let currentObserver: MutationObserver | null = null;
-let isCurrentlyThemed = false;
-
 function getTld(url: string): string | null {
   if (!url) return null;
   try {
@@ -33,7 +18,7 @@ function getTld(url: string): string | null {
       return hostname;
     }
     const parts = hostname.split('.');
-    if (parts.length < 2) return hostname; // e.g. 'com' (unlikely), 'localhost' (already handled)
+    if (parts.length < 2) return hostname;
     // For 'example.com', gives 'example.com'
     // For 'www.example.com', gives 'example.com'
     // For 'sub.example.com', gives 'example.com'
@@ -141,200 +126,6 @@ async function handleRefreshPalette(settings: any, tab: browser.tabs.Tab): Promi
   }
 }
 
-function clearAppliedStyles() {
-  console.log("CS: Clearing previously applied styles.");
-  if (currentObserver) {
-    currentObserver.disconnect();
-    currentObserver = null;
-  }
-  originalInlineStyles.forEach((origStyles, element) => {
-    if (!document.body || !document.body.contains(element)) {
-      return;
-    }
-    // Restore original inline styles
-    if (origStyles.color !== undefined) element.style.color = origStyles.color;
-    if (origStyles.backgroundColor !== undefined) element.style.backgroundColor = origStyles.backgroundColor;
-    if (origStyles.borderColor !== undefined) element.style.borderColor = origStyles.borderColor;
-    if (origStyles.borderTopColor !== undefined) element.style.borderTopColor = origStyles.borderTopColor;
-    if (origStyles.borderRightColor !== undefined) element.style.borderRightColor = origStyles.borderRightColor;
-    if (origStyles.borderBottomColor !== undefined) element.style.borderBottomColor = origStyles.borderBottomColor;
-    if (origStyles.borderLeftColor !== undefined) element.style.borderLeftColor = origStyles.borderLeftColor;
-  });
-  originalInlineStyles.clear();
-  isCurrentlyThemed = false;
-}
-
-function collectColors(): string[] {
-  const colors = new Set<string>();
-  if (!document.body) return [];
-
-  const treeWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-  let node: Element | null;
-  while ((node = treeWalker.nextNode() as Element | null)) {
-    if (node.id === "color-rewriter-style" || node.id === "color-rewriter-root-style" || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.tagName === 'NOSCRIPT') continue;
-    const cs = getComputedStyle(node);
-    const propsToCollect: (keyof CSSStyleDeclaration)[] = ["color", "backgroundColor", "borderColor", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor"];
-    propsToCollect.forEach(prop => {
-      const colorValue = cs.getPropertyValue(prop as string);
-      if (colorValue && colorValue !== "transparent" && colorValue !== "rgba(0, 0, 0, 0)" && colorValue !== "none" && !colorValue.startsWith("var(")) {
-        colors.add(colorValue);
-      }
-    });
-  }
-  // Explicitly add html element's colors if not already picked up or if body is transparent
-  if (document.documentElement) {
-    const csHtml = getComputedStyle(document.documentElement);
-    const propsToCollectHtml: (keyof CSSStyleDeclaration)[] = ["color", "backgroundColor"];
-    propsToCollectHtml.forEach(prop => {
-      const colorValue = csHtml.getPropertyValue(prop as string);
-      if (colorValue && colorValue !== "transparent" && colorValue !== "rgba(0, 0, 0, 0)" && colorValue !== "none" && !colorValue.startsWith("var(")) {
-        colors.add(colorValue);
-      }
-    });
-  }
-  return [...colors];
-}
-
-function applyColorMap(colorMap: ColorMap): void {
-  console.log(`CS (applyColorMap): Called. Received map with ${Object.keys(colorMap).length} keys. First few:`, Object.entries(colorMap).slice(0,3).map(([k,v]) => `${k}=>${v}`).join(', '));
-  if (Object.keys(colorMap).length < 10) { // Log smaller maps fully for easier debugging
-    console.log("CS: Full colorMap:", colorMap);
-  }
-  clearAppliedStyles(); 
-  if (Object.keys(colorMap).length === 0) {
-    console.log("CS: Empty color map. Styles have been cleared. No new theme applied.");
-    return; 
-  }
-  isCurrentlyThemed = true;
-  console.log("CS: Applying new color map.");
-  function processElement(element: Element) {
-    if (!(element instanceof HTMLElement) || element.tagName === 'SCRIPT' || element.tagName === 'STYLE' || element.tagName === 'NOSCRIPT') {
-      return;
-    }
-    const htmlElement = element as HTMLElement;
-    const computedStyle = getComputedStyle(htmlElement);
-
-    const propertiesToProcess: { computed: string, inlineProp: keyof TrackedStyleProperties }[] = [
-      { computed: computedStyle.color, inlineProp: 'color' },
-      { computed: computedStyle.backgroundColor, inlineProp: 'backgroundColor' },
-      { computed: computedStyle.borderColor, inlineProp: 'borderColor' },
-      { computed: computedStyle.borderTopColor, inlineProp: 'borderTopColor' },
-      { computed: computedStyle.borderRightColor, inlineProp: 'borderRightColor' },
-      { computed: computedStyle.borderBottomColor, inlineProp: 'borderBottomColor' },
-      { computed: computedStyle.borderLeftColor, inlineProp: 'borderLeftColor' },
-    ];
-    const originalStylesForThisElement = originalInlineStyles.get(htmlElement) || {};
-    let modifiedOriginals = false;
-
-    propertiesToProcess.forEach(item => {
-      const newColor = colorMap[item.computed];
-      // --- Start Added Logging ---
-      if (item.inlineProp === 'backgroundColor' && (htmlElement === document.body || htmlElement === document.documentElement)) {
-        console.log(`CS_DEBUG: BGColor Check for ${htmlElement.tagName}:`);
-        console.log(`  > Original Computed BG: '${item.computed}'`);
-        console.log(`  > Is in colorMap? : ${item.computed && colorMap.hasOwnProperty(item.computed)}`);
-        console.log(`  > Mapped to (newColor): '${newColor}'`);
-      }
-      // --- End Added Logging ---
-      if (newColor && item.computed !== newColor) {
-        if (originalStylesForThisElement[item.inlineProp] === undefined) {
-          originalStylesForThisElement[item.inlineProp] = htmlElement.style[item.inlineProp as any] || ""; 
-          modifiedOriginals = true;
-        }
-        htmlElement.style.setProperty(item.inlineProp as string, newColor, 'important');
-        // --- Start Added Logging ---
-        if (item.inlineProp === 'backgroundColor' && (htmlElement === document.body || htmlElement === document.documentElement)) {
-          console.log(`CS_DEBUG: Applied BGColor to ${htmlElement.tagName}: '${newColor}' (was '${item.computed}')`);
-        }
-        // --- End Added Logging ---
-      }
-    });
-
-    if (modifiedOriginals) {
-      originalInlineStyles.set(htmlElement, originalStylesForThisElement);
-    }
-  }
-  // Process html and body elements first for clarity in logs
-  if (document.documentElement) processElement(document.documentElement);
-  if (document.body) {
-    processElement(document.body);
-    document.querySelectorAll('body *').forEach(el => processElement(el)); // Then descendants
-  }
-  currentObserver = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      mutation.addedNodes.forEach((node) => {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          processElement(node as Element);
-          (node as Element).querySelectorAll('*').forEach(childEl => processElement(childEl));
-        }
-      });
-    });
-  });
-  if (document.documentElement) {
-    currentObserver.observe(document.documentElement, { childList: true, subtree: true });
-  }  
-  console.log("CS: Color map applied and observer set up.");
-}
-
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log(`CS: Received message: ${message.type} from sender:`, sender.tab ? `tab ${sender.tab.id}`: (sender.id || 'popup/background'));
-  if (message.type === "APPLY_MAP") {
-    console.log(`CS (APPLY_MAP handler): Received APPLY_MAP. Payload items: ${message.payload ? Object.keys(message.payload).length : '(no payload)'}. Applying...`);
-    applyColorMap(message.payload);
-    sendResponse({success: true});
-    return true; 
-  }
-  if (message.type === "GET_COLORS") {
-    const colors = collectColors();
-    console.log("CS (GET_COLORS handler): Sending colors:", colors.length);
-    sendResponse({colors: colors});
-    return true; 
-  }
-  console.warn("CS: Unknown message type received by content script:", message.type);
-  return false; 
-});
-
-async function applyInitialTheme() {
-  try {
-    console.log("CS (applyInitialTheme): Function called. Requesting initial theme settings from background.");
-    const activeSettings = await browser.runtime.sendMessage({ type: "GET_ACTIVE_SETTINGS_FOR_TLD" });
-    console.log("CS (applyInitialTheme): Received response for GET_ACTIVE_SETTINGS_FOR_TLD:", activeSettings ? `${activeSettings.style}, palette items: ${Object.keys(activeSettings.palette || {}).length}` : 'null');
-    if (activeSettings && activeSettings.palette && Object.keys(activeSettings.palette).length > 0) {
-      console.log(`CS (applyInitialTheme): Applying initial theme for TLD. Style: ${activeSettings.style}, Palette items: ${Object.keys(activeSettings.palette).length}.`);
-      applyColorMap(activeSettings.palette);
-    } else {
-      console.log("CS (applyInitialTheme): No active theme (or empty/no palette) found for this TLD. Ensuring styles are cleared by applying empty map.");
-      applyColorMap({}); 
-    }
-  } catch (error) {
-    console.error("CS (applyInitialTheme): Error during execution:", error);
-    if ((error as Error).message.includes("Receiving end does not exist")) {
-      console.warn("CS (applyInitialTheme): Background script might not have been ready during sendMessage.");
-    }
-  }
-}
-
-if (document.readyState === "loading") { 
-  document.addEventListener("DOMContentLoaded", () => {  
-    if (document.body) {
-      console.log("CS: DOMContentLoaded. Sending initial COLOR_SET and calling applyInitialTheme.");
-      browser.runtime.sendMessage({ type: "COLOR_SET", payload: collectColors() }).catch(e => console.error("CS: Error sending initial COLOR_SET (DOMContentLoaded):", e));
-      applyInitialTheme(); 
-    } else {
-      console.warn("CS (DOMContentLoaded): Body not available for COLOR_SET.");
-    }
-  });
-} else { 
-  if (document.body) {
-    console.log("CS: Document already loaded/interactive. Sending initial COLOR_SET and calling applyInitialTheme.");
-    browser.runtime.sendMessage({ type: "COLOR_SET", payload: collectColors() }).catch(e => console.error("CS: Error sending initial COLOR_SET (already loaded):", e));
-    applyInitialTheme(); 
-  } else {
-    console.warn("CS (already loaded): Body not yet available for initial COLOR_SET. Will attempt applyInitialTheme anyway.");
-    applyInitialTheme(); 
-  }
-}
-
 async function fetchPalette(colors: string[], style: string, customDesc?: string): Promise<ColorMap> {
   const providerSettings = await browser.storage.local.get(STORAGE_KEYS.PROVIDER_SETTINGS);
   const provider = providerSettings.provider || "ollama"; // Default to ollama
@@ -380,6 +171,21 @@ async function fetchFromOllama(colors: string[], style: string, customDesc?: str
   console.log(`BG (fetchFromOllama): Attempting to fetch from Ollama API: ${OLLAMA_API_URL}`);
 
   try {
+    // First check if Ollama server is running with a simpler request
+    const checkResponse = await fetch(`${baseOllamaUrl.replace(/\/$/, '')}/api/tags`, {
+      method: "GET"
+    }).catch(error => {
+      console.error("BG (fetchFromOllama): Ollama server connectivity check failed:", error);
+      throw new Error(`Ollama server connection failed: ${error.message} - Is Ollama running?`);
+    });
+    
+    if (!checkResponse.ok) {
+      throw new Error(`Ollama server returned status ${checkResponse.status} during connectivity check`);
+    }
+    
+    console.log("BG (fetchFromOllama): Ollama server connectivity confirmed");
+    
+    // Now send the actual chat request
     const response = await fetch(OLLAMA_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -534,7 +340,7 @@ browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 browser.contextMenus.create({
   id: "open-options",
-  title: "Themer Options", // Changed title slightly
+  title: "Themer Options",
   contexts: ["browser_action"]
 });
 
