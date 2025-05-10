@@ -21,44 +21,10 @@ const originalInlineStyles = new Map<HTMLElement, TrackedStyleProperties>();
 let currentObserver: MutationObserver | null = null;
 let isCurrentlyThemed = false;
 
-function clearAppliedStyles() {
-  console.log("CS: Clearing previously applied styles.");
-  if (currentObserver) {
-    currentObserver.disconnect();
-    currentObserver = null;
-  }
-  originalInlineStyles.forEach((origStyles, element) => {
-    if (!document.body || !document.body.contains(element)) {
-      originalInlineStyles.delete(element);
-      return;
-    }
-    // Restore original inline styles
-    if (origStyles.color !== undefined) element.style.color = origStyles.color;
-    if (origStyles.backgroundColor !== undefined) element.style.backgroundColor = origStyles.backgroundColor;
-    if (origStyles.borderColor !== undefined) element.style.borderColor = origStyles.borderColor;
-    if (origStyles.borderTopColor !== undefined) element.style.borderTopColor = origStyles.borderTopColor;
-    if (origStyles.borderRightColor !== undefined) element.style.borderRightColor = origStyles.borderRightColor;
-    if (origStyles.borderBottomColor !== undefined) element.style.borderBottomColor = origStyles.borderBottomColor;
-    if (origStyles.borderLeftColor !== undefined) element.style.borderLeftColor = origStyles.borderLeftColor;
-  });
-  originalInlineStyles.clear();
-  isCurrentlyThemed = false;
-}
-
-// Import the collector utility
-import { collectPageColors } from "./utils/color-collector";
-
-/**
- * Collect colors from the page with semantic information
- */
-function collectColors() {
-  return collectPageColors();
-}
-
 /**
  * Helper to detect if a color map represents a dark theme
  */
-function isDarkMode(colorMap: ColorMap): boolean {
+function isDarkTheme(colorMap: ColorMap): boolean {
   // Count dark colors in the color map
   let darkColorCount = 0;
   let totalColors = 0;
@@ -118,6 +84,30 @@ function ensureDarkBackgrounds(colorMap: ColorMap): void {
   }
 }
 
+function clearAppliedStyles() {
+  console.log("CS: Clearing previously applied styles.");
+  if (currentObserver) {
+    currentObserver.disconnect();
+    currentObserver = null;
+  }
+  originalInlineStyles.forEach((origStyles, element) => {
+    if (!document.body || !document.body.contains(element)) {
+      originalInlineStyles.delete(element);
+      return;
+    }
+    // Restore original inline styles
+    if (origStyles.color !== undefined) element.style.color = origStyles.color;
+    if (origStyles.backgroundColor !== undefined) element.style.backgroundColor = origStyles.backgroundColor;
+    if (origStyles.borderColor !== undefined) element.style.borderColor = origStyles.borderColor;
+    if (origStyles.borderTopColor !== undefined) element.style.borderTopColor = origStyles.borderTopColor;
+    if (origStyles.borderRightColor !== undefined) element.style.borderRightColor = origStyles.borderRightColor;
+    if (origStyles.borderBottomColor !== undefined) element.style.borderBottomColor = origStyles.borderBottomColor;
+    if (origStyles.borderLeftColor !== undefined) element.style.borderLeftColor = origStyles.borderLeftColor;
+  });
+  originalInlineStyles.clear();
+  isCurrentlyThemed = false;
+}
+
 function applyColorMap(colorMap: ColorMap): void {
   console.log(`CS (applyColorMap): Called. Received map with ${Object.keys(colorMap).length} keys.`);
   if (Object.keys(colorMap).length < 10 && Object.keys(colorMap).length > 0) {
@@ -133,16 +123,14 @@ function applyColorMap(colorMap: ColorMap): void {
   
   isCurrentlyThemed = true;
   console.log("CS: Applying new color map.");
-    // Detect if this is a dark theme
-  const isDarkTheme = isDarkMode(colorMap);
   
-  // Special handling for dark themes - ensure body/html have dark backgrounds
-  if (isDarkTheme) {
-    console.log("CS: Applying DARK theme - special handling for background colors");
+  // Check if this is a dark theme
+  const isDarkMode = isDarkTheme(colorMap);
+  if (isDarkMode) {
+    console.log("CS: Detected dark mode theme - ensuring body/html background is dark");
     ensureDarkBackgrounds(colorMap);
-  } else {
-    console.log("CS: Applying LIGHT theme");
   }
+
   function processElement(element: Element) {
     if (!(element instanceof HTMLElement) || element.tagName === 'SCRIPT' || element.tagName === 'STYLE' || element.tagName === 'NOSCRIPT') {
       return;
@@ -152,23 +140,17 @@ function applyColorMap(colorMap: ColorMap): void {
     const computedStyle = getComputedStyle(htmlElement);
 
     // Special handling for html and body in dark mode
-    const isDarkMode = document.documentElement.classList.contains('dark-mode') || 
-                       Object.values(colorMap).some(color => color?.toLowerCase() === '#121212');
-    
     const isHtmlOrBody = element === document.documentElement || element === document.body;
     
-    // For dark mode, force dark background on html/body if not already mapped
+    // Force dark background on html/body if needed
     if (isDarkMode && isHtmlOrBody) {
       const currentBgColor = computedStyle.backgroundColor;
-      // Only if no explicit mapping exists
-      if (!colorMap[currentBgColor]) {
-        const originalBg = htmlElement.style.backgroundColor || "";
-        originalInlineStyles.set(htmlElement, { 
-          ...originalInlineStyles.get(htmlElement) || {},
-          backgroundColor: originalBg 
-        });
-        htmlElement.style.setProperty('backgroundColor', '#121212', 'important');
-        console.log(`CS: Forced dark background on ${htmlElement.tagName}`);
+      const newColor = colorMap[currentBgColor];
+      
+      if (!newColor && currentBgColor !== "rgba(0, 0, 0, 0)" && currentBgColor !== "transparent") {
+        // Add to colorMap if not already there
+        colorMap[currentBgColor] = "#121212";
+        console.log(`CS: Force-added dark mapping for ${element.tagName} background:`, currentBgColor, "→ #121212");
       }
     }
 
@@ -238,7 +220,164 @@ function applyColorMap(colorMap: ColorMap): void {
   console.log("CS: Color map applied and observer set up.");
 }
 
-// No longer needed - merged into collectColors function
+/**
+ * Collect all colors from the page
+ */
+function collectColors(): string[] {
+  const colors = new Set<string>();
+  if (!document.body) return [];
+
+  const treeWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+  let node: Element | null;
+  
+  // First make sure to capture the html and body background colors
+  if (document.documentElement) {
+    const htmlStyle = getComputedStyle(document.documentElement);
+    const bgColor = htmlStyle.backgroundColor;
+    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
+      colors.add(bgColor);
+    }
+  }
+  
+  if (document.body) {
+    const bodyStyle = getComputedStyle(document.body);
+    const bgColor = bodyStyle.backgroundColor;
+    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
+      colors.add(bgColor);
+    }
+  }
+  
+  // Then process all other elements
+  while ((node = treeWalker.nextNode() as Element | null)) {
+    if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.tagName === 'NOSCRIPT') continue;
+
+    const cs = getComputedStyle(node);
+    const propsToCollect: (keyof CSSStyleDeclaration)[] = ["color", "backgroundColor", "borderColor", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor"];
+    
+    propsToCollect.forEach(prop => {
+      const colorValue = cs.getPropertyValue(prop as string);
+      if (colorValue && colorValue !== "transparent" && colorValue !== "rgba(0, 0, 0, 0)" && colorValue !== "none" && !colorValue.startsWith("var(")) {
+        colors.add(colorValue);
+      }
+    });
+  }
+  
+  console.log(`CS (collectColors): Collected ${colors.size} unique colors.`);
+  return [...colors];
+}
+
+/**
+ * Collect page colors with semantic information
+ */
+function collectColorsWithSemantics(): {colors: string[], semantics: any} {
+  const allColors = new Set<string>();
+  const backgroundColors = new Set<string>();
+  const textColors = new Set<string>();
+  const borderColors = new Set<string>();
+  const accentColors = new Set<string>();
+  const linkColors = new Set<string>();
+  
+  // First collect colors from HTML and BODY elements (important for backgrounds)
+  if (document.documentElement) {
+    const htmlStyle = getComputedStyle(document.documentElement);
+    const bgColor = htmlStyle.backgroundColor;
+    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
+      allColors.add(bgColor);
+      backgroundColors.add(bgColor);
+      console.log("CS: HTML background color:", bgColor);
+    }
+  }
+  
+  if (document.body) {
+    const bodyStyle = getComputedStyle(document.body);
+    const bgColor = bodyStyle.backgroundColor;
+    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
+      allColors.add(bgColor);
+      backgroundColors.add(bgColor);
+      console.log("CS: BODY background color:", bgColor);
+    }
+  }
+  
+  // Sample elements from the page to avoid performance issues
+  const maxElements = 1000;
+  let count = 0;
+  
+  const treeWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+  let node: Element | null;
+  
+  while ((node = treeWalker.nextNode() as Element | null) && count < maxElements) {
+    if (!node || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.tagName === 'NOSCRIPT') continue;
+    count++;
+    
+    const cs = getComputedStyle(node);
+    const tagName = node.tagName.toLowerCase();
+    
+    // Extract color properties
+    const color = cs.color;
+    const bgColor = cs.backgroundColor;
+    const borderTop = cs.borderTopColor;
+    const borderRight = cs.borderRightColor;
+    const borderBottom = cs.borderBottomColor;
+    const borderLeft = cs.borderLeftColor;
+    
+    // Handle text color
+    if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)" && color !== "none") {
+      allColors.add(color);
+      textColors.add(color);
+      
+      // Special handling for link colors
+      if (tagName === 'a') {
+        linkColors.add(color);
+      }
+    }
+    
+    // Handle background color
+    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
+      allColors.add(bgColor);
+      
+      // Check if likely to be a main content area
+      const rect = node.getBoundingClientRect();
+      if (rect.width > 200 && rect.height > 100) {
+        backgroundColors.add(bgColor);
+      }
+      
+      // Check if interactive element
+      if (tagName === 'button' || tagName === 'input' || tagName === 'a') {
+        accentColors.add(bgColor);
+      }
+    }
+    
+    // Handle border colors
+    [borderTop, borderRight, borderBottom, borderLeft].forEach(borderColor => {
+      if (borderColor && borderColor !== "transparent" && borderColor !== "rgba(0, 0, 0, 0)" && borderColor !== "none") {
+        allColors.add(borderColor);
+        borderColors.add(borderColor);
+      }
+    });
+  }
+  
+  // Collect colors from main content areas
+  document.querySelectorAll('main, article, .content, .main, #content, #main').forEach(el => {
+    const style = getComputedStyle(el);
+    const bgColor = style.backgroundColor;
+    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
+      allColors.add(bgColor);
+      backgroundColors.add(bgColor);
+    }
+  });
+  
+  // Return results
+  return {
+    colors: Array.from(allColors),
+    semantics: {
+      backgroundColors: Array.from(backgroundColors),
+      textColors: Array.from(textColors),
+      borderColors: Array.from(borderColors),
+      accentColors: Array.from(accentColors),
+      linkColors: Array.from(linkColors)
+    }
+  };
+}
 
 // Set up message listener for handling commands from background script
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -252,12 +391,11 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.type === "GET_COLORS") {
-    // Use the collector utility to get colors with semantic information
-    const results = collectPageColors();
-    console.log("CS (GET_COLORS handler): Sending colors:", results.allColors.length);
+    const colorInfo = collectColorsWithSemantics();
+    console.log("CS (GET_COLORS handler): Sending colors:", colorInfo.colors.length);
     sendResponse({
-      colors: results.allColors,
-      semantics: results.semantics
+      colors: colorInfo.colors,
+      semantics: colorInfo.semantics
     });
     return true; 
   }
@@ -294,10 +432,10 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     console.log("CS: DOMContentLoaded. Sending colors and applying initial theme.");
     if (document.body) {
-      const colorInfo = collectColors();
+      const colorInfo = collectColorsWithSemantics();
       browser.runtime.sendMessage({ 
         type: "COLOR_SET", 
-        payload: colorInfo.allColors 
+        payload: colorInfo.colors 
       }).catch(e => console.error("CS: Error sending COLOR_SET:", e));
     }
     applyInitialTheme();
@@ -305,10 +443,10 @@ if (document.readyState === "loading") {
 } else {
   console.log("CS: Document already loaded. Sending colors and applying initial theme.");
   if (document.body) {
-    const colorInfo = collectColors();
+    const colorInfo = collectColorsWithSemantics();
     browser.runtime.sendMessage({ 
       type: "COLOR_SET", 
-      payload: colorInfo.allColors 
+      payload: colorInfo.colors 
     }).catch(e => console.error("CS: Error sending COLOR_SET:", e));
   }
   applyInitialTheme();

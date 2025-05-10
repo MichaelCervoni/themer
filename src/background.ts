@@ -334,7 +334,6 @@ function getDarkerVersion(color: string): string {
     return "#121212"; // If we can't parse the color, return a default dark color
   }
 }
-}
 
 async function fetchFromOllama(colors: string[], style: string, customDesc?: string, ollamaBaseUrlFromSettings?: string, prompt?: string): Promise<ColorMap> {
   // Helper function that creates a mock palette when Ollama isn't available
@@ -410,7 +409,8 @@ async function fetchFromOllama(colors: string[], style: string, customDesc?: str
   if (baseOllamaUrl !== "debug" && colors.length > 0) {
     console.log("BG (fetchFromOllama): Will create temporary mock palette if Ollama fails");
   }
-    try {
+  
+  try {
     // First check if Ollama server is running with a simpler request
     console.log(`BG (fetchFromOllama): Testing connection to Ollama server: ${baseOllamaUrl}/api/tags`);
     
@@ -908,5 +908,3 @@ browser.contextMenus.onClicked.addListener((info, tab) => {
     browser.runtime.openOptionsPage();
   }
 });
-
-// Previous testNetworkConnection function removed due to TypeScript errors
