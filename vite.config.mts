@@ -25,8 +25,8 @@ export default defineConfig({
       exclude: [/node_modules\/scheduler/]
     },    rollupOptions: {
       input: {
-        popup:     resolve(__dirname, "src/popup-new.tsx"),
-        options:   resolve(__dirname, "src/options-new.tsx"),
+        popup:     resolve(__dirname, "src/popup.tsx"),
+        options:   resolve(__dirname, "src/options.tsx"),
         background:resolve(__dirname, "src/background.ts"),
         content:   resolve(__dirname, "src/content.ts")
       },
