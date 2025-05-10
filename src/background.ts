@@ -74,18 +74,51 @@ async function handleRefreshPalette(settings: any, tab: browser.tabs.Tab): Promi
         return {success: false, error: "Failed to get colors from content script"};
     }
     
+    const semantics = response.semantics || {};
     console.log(`BG (handleRefreshPalette): Received ${response.colors.length} colors for TLD ${tld}. Style: ${settings.style}`);
+    if (semantics.backgroundColors) {
+      console.log(`BG (handleRefreshPalette): Semantic information available - Background colors: ${semantics.backgroundColors.length}`);
+    }
     
     let colorMap: ColorMap;
-    const paletteCacheKey = getPaletteCacheKey(settings.style, settings.customDescription);
-
-    if (savedPalettesByTld[tld]?.[paletteCacheKey]) {
+    const paletteCacheKey = getPaletteCacheKey(settings.style, settings.customDescription);    if (savedPalettesByTld[tld]?.[paletteCacheKey]) {
       console.log(`BG (handleRefreshPalette): Using saved palette for TLD ${tld}, Key: ${paletteCacheKey}`);
       colorMap = savedPalettesByTld[tld][paletteCacheKey];
+      
+      // Ensure background colors are properly handled even for saved palettes
+      if (settings.style.toLowerCase().includes('dark') && semantics?.backgroundColors) {
+        console.log("BG: Verifying dark mode backgrounds in saved palette");
+        let modified = false;
+        
+        semantics.backgroundColors.forEach((bgColor: string) => {
+          // If background color doesn't have a mapping or maps to a light color
+          if (!colorMap[bgColor] || 
+              (colorMap[bgColor] && !colorMap[bgColor].match(/#[0-2][0-2][0-2]/))) {
+            colorMap[bgColor] = '#121212'; // Force dark background
+            modified = true;
+          }
+        });
+        
+        // Save the modified palette if changed
+        if (modified) {
+          savedPalettesByTld[tld][paletteCacheKey] = colorMap;
+          await browser.storage.local.set({ [STORAGE_KEYS.SAVED_PALETTES_BY_TLD]: savedPalettesByTld });
+          console.log("BG: Updated saved dark mode palette with corrected backgrounds");
+        }
+      }
     } else {
       console.log(`BG (handleRefreshPalette): No saved palette for TLD ${tld}, Key: ${paletteCacheKey}. Fetching new.`);
       try {
-        colorMap = await fetchPalette(response.colors, settings.style, settings.customDescription);
+        // Pass semantic information to the fetchPalette function
+        colorMap = await fetchPalette(
+          response.colors, 
+          settings.style, 
+          settings.customDescription,
+          undefined,
+          undefined, 
+          semantics
+        );
+        
         console.log("BG (handleRefreshPalette): Generated palette:", colorMap);
         
         if (!savedPalettesByTld[tld]) savedPalettesByTld[tld] = {};
@@ -126,27 +159,181 @@ async function handleRefreshPalette(settings: any, tab: browser.tabs.Tab): Promi
   }
 }
 
-async function fetchPalette(colors: string[], style: string, customDesc?: string): Promise<ColorMap> {
+async function fetchPalette(colors: string[], style: string, customDesc?: string, apiKey?: string, baseUrl?: string, semantics?: any): Promise<ColorMap> {
   const providerSettings = await browser.storage.local.get(STORAGE_KEYS.PROVIDER_SETTINGS);
-  const provider = providerSettings.provider || "ollama"; // Default to ollama
+  const provider = providerSettings.provider || "openai"; // Default to OpenAI instead of Ollama
   console.log(`BG (fetchPalette): Using provider: ${provider}. Style: ${style}`);
   
-  const prompt = `You are a color replacement assistant. You will be given a list of colors (in various formats like hex, rgb, rgba, hsl) and a style. Your task is to return ONLY a JSON object mapping each original color to a new color in HEX format. Preserve the general contrast relationships. The keys in the returned JSON object must be EXACTLY the same as the input color strings.
-Given these colors: ${JSON.stringify(colors)}
+  // Build a more intelligent prompt using semantic information when available
+  let semanticInfo = "";
+  let isDarkMode = style.toLowerCase().includes("dark");
+  let isLightMode = style.toLowerCase().includes("light");
+  
+  // Extract semantic information if available
+  const backgroundColors = semantics?.backgroundColors || [];
+  const textColors = semantics?.textColors || [];
+  const borderColors = semantics?.borderColors || [];
+  const accentColors = semantics?.accentColors || [];
+  const linkColors = semantics?.linkColors || [];
+  
+  if (backgroundColors.length || textColors.length) {
+    semanticInfo = "\nImportant semantic color information:\n";
+    
+    if (backgroundColors.length) {
+      semanticInfo += `Background colors: ${JSON.stringify(backgroundColors.slice(0, 5))}\n`;
+    }
+    
+    if (textColors.length) {
+      semanticInfo += `Text colors: ${JSON.stringify(textColors.slice(0, 5))}\n`;
+    }
+    
+    if (borderColors.length) {
+      semanticInfo += `Border colors: ${JSON.stringify(borderColors.slice(0, 3))}\n`;
+    }
+    
+    if (accentColors.length) {
+      semanticInfo += `Accent colors: ${JSON.stringify(accentColors.slice(0, 3))}\n`;
+    }
+    
+    if (linkColors.length) {
+      semanticInfo += `Link colors: ${JSON.stringify(linkColors.slice(0, 3))}\n`;
+    }
+  }
+  
+  // Add specific guidance for dark/light modes
+  let themeGuidance = "";
+  
+  if (isDarkMode) {
+    themeGuidance = `
+CRITICAL: This is a dark theme. Follow these rules strictly:
+1. ALL background colors must be dark (e.g. #121212, #1A1A1A, #242424)
+2. Text colors must be light (e.g. #E0E0E0, #CCCCCC)
+3. Primary background colors MUST be very dark (around #121212-#191919)
+4. Maintain contrast ratios to ensure readability
+5. If original backgrounds are light, they MUST be mapped to dark colors
+`;
+  } 
+  else if (isLightMode) {
+    themeGuidance = `
+CRITICAL: This is a light theme. Follow these rules strictly:
+1. ALL background colors must be light (e.g. #FFFFFF, #F5F5F5, #F0F0F0)
+2. Text colors should be dark (e.g. #121212, #333333)
+3. Primary background colors MUST be very light (white or near-white)
+4. Maintain contrast ratios to ensure readability
+`;
+  }
+  
+  const prompt = `You are a color replacement assistant. You will be given a list of colors (in various formats like hex, rgb, rgba, hsl) and a style. Your task is to return ONLY a JSON object mapping each original color to a new color in HEX format. Preserve the general contrast relationships.
+
+${semanticInfo}${themeGuidance}
+
+Given these colors: ${JSON.stringify(colors.slice(0, 100))}
 And the desired style "${style}${customDesc ? `: ${customDesc}` : ''}",
 Return ONLY a JSON object mapping each original color (as given) to a hex replacement. Example: {"rgb(255, 0, 0)": "#FF0000", "blue": "#0000FF"}`;
   
   console.log(`BG (fetchPalette): Sending prompt (first 100 chars): ${prompt.substring(0, 100)}...`);
 
+  let colorMap: ColorMap;
+  
   switch(provider) {
     case "openai":
-      return fetchFromOpenAI(colors, style, customDesc, providerSettings.openaiKey, prompt);
+      colorMap = await fetchFromOpenAI(colors, style, customDesc, providerSettings.openaiKey || apiKey, prompt);
+      break;
     case "claude":
-      return fetchFromClaude(colors, style, customDesc, providerSettings.claudeKey, prompt);
+      colorMap = await fetchFromClaude(colors, style, customDesc, providerSettings.claudeKey || apiKey, prompt);
+      break;
     case "ollama":
     default:
-      return fetchFromOllama(colors, style, customDesc, providerSettings.ollamaUrl, prompt);
+      colorMap = await fetchFromOllama(colors, style, customDesc, providerSettings.ollamaUrl || baseUrl, prompt);
+      break;
   }
+    // Post-process the color map for dark mode to ensure backgrounds are dark
+  if (isDarkMode && backgroundColors.length) {
+    console.log("BG: Post-processing dark theme to ensure backgrounds are dark");
+    for (const bgColor of backgroundColors) {
+      const mappedColor = colorMap[bgColor];
+      if (mappedColor) {
+        // Check if the mapped color is light
+        try {
+          const isLight = isLightColor(mappedColor);
+          if (isLight) {
+            console.log(`BG: Replacing light background color ${mappedColor} with dark alternative`);
+            colorMap[bgColor] = getDarkerVersion(mappedColor);
+          }
+        } catch (e) {
+          // If we can't parse the color, keep the original mapping
+        }
+      } else {
+        // If background color wasn't mapped, add a default dark mapping
+        colorMap[bgColor] = "#121212";
+      }
+    }
+  }
+  
+  return colorMap;
+}
+
+/**
+ * Check if a color is light based on its brightness
+ */
+function isLightColor(color: string): boolean {
+  try {
+    let r = 0, g = 0, b = 0;
+    
+    if (color.startsWith('#')) {
+      const hex = color.replace('#', '');
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    } else if (color.startsWith('rgb')) {
+      const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (match) {
+        r = parseInt(match[1]);
+        g = parseInt(match[2]);
+        b = parseInt(match[3]);
+      }
+    }
+    
+    // Calculate perceived brightness
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness > 128; // Above 128 is considered light
+  } catch (e) {
+    return false; // If we can't determine, assume it's not light
+  }
+}
+
+/**
+ * Get a darker version of a color
+ */
+function getDarkerVersion(color: string): string {
+  try {
+    let r = 0, g = 0, b = 0;
+    
+    if (color.startsWith('#')) {
+      const hex = color.replace('#', '');
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    } else if (color.startsWith('rgb')) {
+      const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (match) {
+        r = parseInt(match[1]);
+        g = parseInt(match[2]);
+        b = parseInt(match[3]);
+      }
+    }
+    
+    // Make the color darker by reducing each component
+    r = Math.max(r * 0.3, 0);
+    g = Math.max(g * 0.3, 0);
+    b = Math.max(b * 0.3, 0);
+    
+    // Convert back to hex
+    return `#${Math.round(r).toString(16).padStart(2, '0')}${Math.round(g).toString(16).padStart(2, '0')}${Math.round(b).toString(16).padStart(2, '0')}`;
+  } catch (e) {
+    return "#121212"; // If we can't parse the color, return a default dark color
+  }
+}
 }
 
 async function fetchFromOllama(colors: string[], style: string, customDesc?: string, ollamaBaseUrlFromSettings?: string, prompt?: string): Promise<ColorMap> {
@@ -320,13 +507,39 @@ async function fetchFromOllama(colors: string[], style: string, customDesc?: str
   }
 }
 
+// Import will be added by bundler - we're using the functions directly
+// import { getDevOpenAIKey } from "./utils/dev-keys";
+
+/**
+ * Try to get an OpenAI API key from storage (for development)
+ */
+async function tryGetDevOpenAIKey(): Promise<string | undefined> {
+  try {
+    const devKeyData = await browser.storage.local.get("DEV_OPENAI_KEY");
+    return devKeyData.DEV_OPENAI_KEY || undefined;
+  } catch (e) {
+    console.warn("BG: Error checking for development API key", e);
+    return undefined;
+  }
+}
+
 async function fetchFromOpenAI(colors: string[], style: string, customDesc?: string, apiKey?: string, prompt?: string): Promise<ColorMap> {
-  if (!apiKey) throw new Error("OpenAI API key is required.");
+  // Try to get a development key if no key provided
+  let effectiveApiKey = apiKey;
+  
+  if (!effectiveApiKey) {
+    effectiveApiKey = await tryGetDevOpenAIKey();
+  }
+  
+  if (!effectiveApiKey) {
+    throw new Error("OpenAI API key is required. Set it in the options page.");
+  }
+  
   const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
   console.log("BG (fetchFromOpenAI): Sending request to OpenAI API");
   const response = await fetch(OPENAI_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${effectiveApiKey}` },
     body: JSON.stringify({ model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }] }) // Using gpt-3.5-turbo for cost/speed
   });
   if (!response.ok) {
@@ -623,6 +836,26 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
     }
   }
   
+  if (message.type === "SET_DEV_OPENAI_KEY") {
+    try {
+      const { key } = message;
+      if (!key) {
+        return { success: false, error: "No API key provided" };
+      }
+      
+      console.log("BG (SET_DEV_OPENAI_KEY): Storing development OpenAI key");
+      await browser.storage.local.set({ DEV_OPENAI_KEY: key });
+      
+      return { success: true, message: "Development OpenAI API key stored successfully" };
+    } catch (error) {
+      console.error("BG (SET_DEV_OPENAI_KEY): Error storing key:", error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error storing key" 
+      };
+    }
+  }
+
   console.warn("BG: Unknown message type received:", message.type);
   return Promise.resolve({success: false, error: `Unknown message type: ${message.type}`});
 });

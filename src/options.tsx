@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { checkOllamaAvailability } from "./utils/ollama-helper";
+import { saveDevOpenAIKey } from "./utils/dev-keys";
 
 type Provider = "ollama" | "openai" | "claude";
 
@@ -11,11 +12,13 @@ interface OptState {
   ollamaUrl?: string; // fallback if user changed port
 }
 
-const INITIAL: OptState = { provider: "ollama" };
+// Default to OpenAI now
+const INITIAL: OptState = { provider: "openai" };
 
 function Options() {
   const [state, setState] = useState<OptState>(INITIAL);
   const [saved, setSaved] = useState(false);
+  const [devKey, setDevKey] = useState("");
 
   // ── load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -28,7 +31,9 @@ function Options() {
     await browser.storage.local.set(state);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
-  };  // Function to debug the connection by testing all approaches and showing results
+  };
+
+  // Function to debug the connection by testing all approaches and showing results
   const debugOllamaConnection = async (url: string) => {
     const results: string[] = [];
     let directFetchSuccess = false;
@@ -75,7 +80,8 @@ function Options() {
     } catch (error) {
       results.push(`✗ Proxy message error: ${error instanceof Error ? error.message : String(error)}`);
     }
-      // Test 3: System-level check
+    
+    // Test 3: System-level check
     results.push("\n3. System-level check (should succeed):");
     try {
       const sysResponse = await browser.runtime.sendMessage({
@@ -157,7 +163,51 @@ function Options() {
       alert(`Error: ${error instanceof Error ? error.message : String(error)}\n\nPlease check:\n1. Is Ollama running?\n2. Is the URL correct? (try http://127.0.0.1:11434)\n3. Or use "debug" as URL to use mock data instead`);
     }
   };
-  // Network diagnostics function removed due to TypeScript errors
+
+  const handleSaveDevKey = async () => {
+    try {
+      if (!devKey || devKey.length < 10) {
+        alert("Please enter a valid OpenAI API key");
+        return;
+      }
+
+      const result = await saveDevOpenAIKey(devKey);
+      if (result.success) {
+        alert("Development API key saved successfully!");
+        setDevKey("");
+      } else {
+        alert(`Error: ${result.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const runNetworkDiagnostics = async () => {
+    try {
+      const baseUrl = state.ollamaUrl || "http://127.0.0.1:11434";
+      
+      alert("Running network diagnostics. This may take a moment...");
+      
+      // Send a message to the background script to run the diagnostics
+      const results = await browser.runtime.sendMessage({
+        type: "OLLAMA_SYSTEM_CHECK",
+        url: baseUrl + "/api/tags"
+      });
+      
+      if (results.success) {
+        alert("Connection successful!\n\nOllama appears to be running and accessible from the extension. If you're still having issues, check that you have models installed with 'ollama pull llama3'.");
+      } else {
+        alert("Connection failed: " + (results.error || "Unknown error") + 
+              "\n\nRecommendations:" +
+              "\n1. Make sure Ollama is running (run 'ollama serve' in terminal)" + 
+              "\n2. Try using http://localhost:11434 or http://127.0.0.1:11434" +
+              "\n3. Use 'debug' as URL to use mock data instead of real API calls");
+      }
+    } catch (error) {
+      alert("Error running diagnostics: " + (error instanceof Error ? error.message : String(error)));
+    }
+  };
 
   return (
     <form
@@ -168,12 +218,12 @@ function Options() {
       }}
     >
       <fieldset>
-        <legend className="font-medium mb-1">LLM Provider</legend>
+        <legend className="font-medium mb-1">LLM Provider</legend>
         {(
           [
-            { id: "ollama", label: "Local Ollama" },
+            { id: "ollama", label: "Local Ollama" },
             { id: "openai", label: "OpenAI" },
-            { id: "claude", label: "Anthropic Claude" },
+            { id: "claude", label: "Anthropic Claude" },
           ] as const
         ).map(({ id, label }) => (
           <label key={id} className="block">
@@ -191,7 +241,7 @@ function Options() {
 
       {state.provider === "ollama" && (
         <div>
-          <label className="block font-medium mb-1">Ollama Base URL</label>
+          <label className="block font-medium mb-1">Ollama Base URL</label>
           <input
             type="url"
             className="w-full border rounded p-1"
@@ -202,51 +252,30 @@ function Options() {
           />
           <div className="text-xs mt-1 text-gray-600">
             Enter "debug" to use mock responses for testing. Example: http://127.0.0.1:11434
-          </div>      <div className="flex space-x-2">
-        <button
-          type="button"
-          onClick={testConnection}
-          className="mt-2 rounded bg-blue-500 text-white py-1 px-4 hover:bg-blue-600"
-        >
-          Test Ollama Connection
-        </button>
-        
-        <button
-          type="button"          onClick={async () => {
-            try {
-              const baseUrl = state.ollamaUrl || "http://127.0.0.1:11434";
-              
-              alert("Running network diagnostics. This may take a moment...");
-              
-              // Import the firewall check utility dynamically
-              const { checkFirewallIssues } = await import('./utils/firewall-check');
-              const diagnostics = await checkFirewallIssues(baseUrl);
-              
-              if (diagnostics.accessible) {
-                alert("Connection successful!\n\n" + diagnostics.message + "\n\n" + diagnostics.details);
-              } else {
-                alert("Connection failed: " + diagnostics.message + 
-                      "\n\n" + diagnostics.details +
-                      "\n\nQuick Fixes:" +
-                      "\n1. Make sure Ollama is running (run 'ollama serve' in terminal)" + 
-                      "\n2. Check Windows/Mac firewall settings" +
-                      "\n3. Try 'debug' as URL to use mock data instead");
-              }
-            } catch (error) {
-              alert("Error running diagnostics: " + (error instanceof Error ? error.message : String(error)));
-            }
-          }}
-          className="mt-2 rounded bg-gray-500 text-white py-1 px-4 hover:bg-gray-600"
-        >
-          Network Diagnostics
-        </button>
-      </div>          {/* Network Diagnostics button removed due to TypeScript errors */}
+          </div>
+          <div className="flex space-x-2">
+            <button
+              type="button"
+              onClick={testConnection}
+              className="mt-2 rounded bg-blue-500 text-white py-1 px-4 hover:bg-blue-600"
+            >
+              Test Ollama Connection
+            </button>
+            
+            <button
+              type="button"
+              onClick={runNetworkDiagnostics}
+              className="mt-2 rounded bg-gray-500 text-white py-1 px-4 hover:bg-gray-600"
+            >
+              Network Diagnostics
+            </button>
+          </div>
         </div>
       )}
 
       {state.provider === "openai" && (
         <div>
-          <label className="block font-medium mb-1">OpenAI API Key</label>
+          <label className="block font-medium mb-1">OpenAI API Key</label>
           <input
             type="password"
             className="w-full border rounded p-1"
@@ -255,12 +284,35 @@ function Options() {
               setState((s) => ({ ...s, openaiKey: e.target.value }))
             }
           />
+          
+          <div className="mt-4 border-t pt-4">
+            <label className="block font-medium mb-1 text-sm text-gray-700">Development API Key</label>
+            <div className="flex space-x-2 mt-1">
+              <input
+                type="password"
+                placeholder="Enter OpenAI API key for development"
+                className="flex-grow border rounded p-1 text-sm"
+                value={devKey}
+                onChange={(e) => setDevKey(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleSaveDevKey}
+                className="bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs py-1 px-2 rounded"
+              >
+                Save Dev Key
+              </button>
+            </div>
+            <p className="text-xs mt-1 text-gray-500">
+              This key is stored separately and used as a fallback during development
+            </p>
+          </div>
         </div>
       )}
 
       {state.provider === "claude" && (
         <div>
-          <label className="block font-medium mb-1">Claude API Key</label>
+          <label className="block font-medium mb-1">Claude API Key</label>
           <input
             type="password"
             className="w-full border rounded p-1"
@@ -278,7 +330,7 @@ function Options() {
       >
         Save
       </button>
-      {saved && <span className="text-green-700 ml-3">✔ Saved!</span>}
+      {saved && <span className="text-green-700 ml-3">✔ Saved!</span>}
     </form>
   );
 }
