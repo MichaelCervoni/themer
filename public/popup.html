@@ -20,17 +20,33 @@
       cursor: pointer;
       width: 100%;
     }
+    .custom-field {
+      margin-top: 8px;
+      display: none;
+    }
   </style>
 </head>
 <body>
   <h2>Color Rewriter</h2>
-  <p>Basic functionality for testing</p>
+  <p>Select a theme style:</p>
   
   <select id="theme-select">
+    <option value="Original">Original</option>
     <option value="Dark">Dark Theme</option>
     <option value="Light">Light Theme</option>
     <option value="Solarized">Solarized</option>
+    <option value="Nord">Nord</option>
+    <option value="Custom">Custom</option>
   </select>
+  
+  <div id="custom-field" class="custom-field">
+    <label for="custom-description">Custom Description:</label>
+    <input 
+      type="text" 
+      id="custom-description" 
+      placeholder="e.g., blue cyberpunk theme" 
+      style="width: 100%; padding: 8px; margin: 4px 0; box-sizing: border-box;">
+  </div>
   
   <button id="apply-btn">Apply Theme</button>
   <button id="options-btn">Options</button>

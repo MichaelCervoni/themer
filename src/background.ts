@@ -242,10 +242,10 @@ Return ONLY a JSON object mapping each original color (as given) to a hex replac
   
   switch(provider) {
     case "openai":
-      colorMap = await fetchFromOpenAI(colors, style, customDesc, providerSettings.openaiKey || apiKey, prompt);
+      colorMap = await fetchFromOpenAI(colors, style, customDesc, providerSettings.openaiKey, prompt);
       break;
     case "claude":
-      colorMap = await fetchFromClaude(colors, style, customDesc, providerSettings.claudeKey || apiKey, prompt);
+      colorMap = await fetchFromClaude(colors, style, customDesc, providerSettings.claudeKey, prompt);
       break;
     case "ollama":
     default:

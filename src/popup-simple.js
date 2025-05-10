@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', function() {
   console.log('DOMContentLoaded fired');
   
   const themeSelect = document.getElementById('theme-select');
+  const customField = document.getElementById('custom-field');
+  const customInput = document.getElementById('custom-description');
   const applyBtn = document.getElementById('apply-btn');
   const optionsBtn = document.getElementById('options-btn');
   const msgDiv = document.getElementById('message');
@@ -14,6 +16,15 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   
   console.log('DOM elements found');
+  
+  // Show/hide custom description field based on theme selection
+  themeSelect.addEventListener('change', function() {
+    if (themeSelect.value === 'Custom') {
+      customField.style.display = 'block';
+    } else {
+      customField.style.display = 'none';
+    }
+  });
   
   // Apply theme button
   applyBtn.addEventListener('click', async function() {
@@ -27,12 +38,17 @@ document.addEventListener('DOMContentLoaded', function() {
         throw new Error('No active tab found');
       }
       
+      // Get custom description if applicable
+      const customDescription = 
+        themeSelect.value === 'Custom' ? 
+        customInput.value : '';
+      
       const result = await browser.runtime.sendMessage({
         type: "REFRESH_PALETTE",
         targetTab: tabs[0],
         settings: {
           style: themeSelect.value,
-          customDescription: ''
+          customDescription: customDescription
         }
       });
       
@@ -53,6 +69,11 @@ document.addEventListener('DOMContentLoaded', function() {
   optionsBtn.addEventListener('click', function() {
     browser.runtime.openOptionsPage();
   });
+  
+  // Initialize UI state
+  if (themeSelect.value === 'Custom') {
+    customField.style.display = 'block';
+  }
 });
 
 // For browsers where DOMContentLoaded might have already fired
