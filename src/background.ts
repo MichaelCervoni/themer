@@ -591,6 +591,12 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
     }
   }
 
+  // Add this to your existing message listener
+  if (message.type === "CONTENT_SCRIPT_LOADED") {
+    console.log(`BG: Content script loaded notification from ${message.url}`);
+    return Promise.resolve({success: true});
+  }
+
   console.warn("BG: Unknown message type received:", message.type);
   return Promise.resolve({success: false, error: `Unknown message type: ${message.type}`});
 });
@@ -632,14 +638,20 @@ browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
-browser.contextMenus.create({
-  id: "open-options",
-  title: "Themer Options",
-  contexts: ["browser_action"]
-});
+try {
+  if (browser.contextMenus) {
+    browser.contextMenus.create({
+      id: "open-options",
+      title: "Themer Options",
+      contexts: ["browser_action"]
+    });
 
-browser.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "open-options") {
-    browser.runtime.openOptionsPage();
+    browser.contextMenus.onClicked.addListener((info, tab) => {
+      if (info.menuItemId === "open-options") {
+        browser.runtime.openOptionsPage();
+      }
+    });
   }
-});
+} catch (e) {
+  console.warn("BG: Context menus API not available:", e);
+}

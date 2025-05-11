@@ -1,3 +1,24 @@
+// Add this at the very top of the file
+console.log("THEMER CONTENT SCRIPT: Loaded at", new Date().toISOString());
+
+// Verify browser.runtime is available
+console.log("THEMER CONTENT SCRIPT: browser.runtime available:", !!browser.runtime);
+
+// Add this code at the beginning of the file
+// This will run immediately when the script loads
+(function checkContentScriptExecution() {
+  console.log("CS: Content script initialized for", window.location.href);
+  // Send a simple ping to the background script to verify communication works
+  try {
+    browser.runtime.sendMessage({
+      type: "CONTENT_SCRIPT_LOADED",
+      url: window.location.href
+    }).catch(err => console.error("CS: Error sending initial message:", err));
+  } catch (e) {
+    console.error("CS: Error in initialization:", e);
+  }
+})();
+
 // content.ts - Runs in the context of web pages
 import type { ColorMap } from "./types";
 
@@ -5,6 +26,9 @@ import type { ColorMap } from "./types";
 import * as consoleUtils from './utils/console-utils';
 
 console.log("CS: Content script loaded at", new Date().toISOString());
+
+// Add this at the top of the file to ensure it runs
+console.log("CS: Content script LOADED at", new Date().toISOString());
 
 // Define a type for the style properties we are tracking
 type TrackedStyleProperties = {
@@ -331,30 +355,79 @@ function collectColorsWithSemantics(): {colors: string[], semantics: any} {
   };
 }
 
-// Set up message listener for handling commands from background script
+// Improve the message listener to be more robust
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log(`CS: Received message: ${message.type}`);
-  
-  if (message.type === "APPLY_MAP") {
-    console.log(`CS (APPLY_MAP handler): Received APPLY_MAP. Payload items: ${message.payload ? Object.keys(message.payload).length : '(no payload)'}. Applying...`);
-    applyColorMap(message.payload);
-    sendResponse({success: true});
-    return true; 
+  try {
+    console.log(`CS: Received message: ${message.type}`, message);
+    
+    if (message.type === "APPLY_MAP") {
+      console.log(`CS (APPLY_MAP handler): Received APPLY_MAP. Payload items: ${Object.keys(message.payload).length}. Applying...`);
+      applyColorMap(message.payload);
+      sendResponse({success: true});
+      return true;  // Indicates async response
+    }
+    
+    if (message.type === "GET_COLORS") {
+      const colorInfo = collectColorsWithSemantics();
+      console.log("CS (GET_COLORS handler): Sending colors:", colorInfo.colors.length);
+      sendResponse({
+        colors: colorInfo.colors,
+        semantics: colorInfo.semantics
+      });
+      return true; 
+    }
+    
+    console.warn("CS: Unknown message type received by content script:", message.type);
+    return false;
+  } catch (error) {
+    console.error("CS: Error handling message:", error);
+    sendResponse({success: false, error: String(error)});
+    return true;
   }
-  
-  if (message.type === "GET_COLORS") {
-    const colorInfo = collectColorsWithSemantics();
-    console.log("CS (GET_COLORS handler): Sending colors:", colorInfo.colors.length);
-    sendResponse({
-      colors: colorInfo.colors,
-      semantics: colorInfo.semantics
-    });
-    return true; 
-  }
-  
-  console.warn("CS: Unknown message type received by content script:", message.type);
-  return false;
 });
+
+// Set up a robust message listener
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  try {
+    console.log(`THEMER CONTENT SCRIPT: Received message type: ${message.type}`);
+    
+    if (message.type === "APPLY_MAP") {
+      console.log(`THEMER CONTENT SCRIPT: Applying color map with ${Object.keys(message.payload).length} colors`);
+      applyColorMap(message.payload);
+      sendResponse({success: true});
+      return true;
+    }
+    
+    if (message.type === "GET_COLORS") {
+      // Your existing GET_COLORS handling
+    }
+    
+    sendResponse({success: false, error: "Unknown message type"});
+    return true;
+  } catch (error) {
+    console.error("THEMER CONTENT SCRIPT: Error processing message:", error);
+    sendResponse({success: false, error: String(error)});
+    return true;
+  }
+});
+
+// Test communication immediately
+setTimeout(() => {
+  try {
+    console.log("THEMER CONTENT SCRIPT: Sending test message to background");
+    browser.runtime.sendMessage({
+      type: "CONTENT_SCRIPT_LOADED",
+      url: window.location.href,
+      timestamp: Date.now()
+    }).then(response => {
+      console.log("THEMER CONTENT SCRIPT: Got response from background:", response);
+    }).catch(error => {
+      console.error("THEMER CONTENT SCRIPT: Error sending test message:", error);
+    });
+  } catch (e) {
+    console.error("THEMER CONTENT SCRIPT: Error in test communication:", e);
+  }
+}, 1000);
 
 // Apply theme on page load
 async function applyInitialTheme() {
