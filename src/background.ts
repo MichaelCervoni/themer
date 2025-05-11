@@ -232,12 +232,17 @@ CRITICAL: This is a light theme. Follow these rules strictly:
 
 ${semanticInfo}${themeGuidance}
 
+IMPORTANT: For transparent colors like "rgba(0, 0, 0, 0)" or "transparent":
+- In dark themes: Map them to a dark color like "#121212" or "#181818"
+- In light themes: Map them to a light color like "#FFFFFF" or "#F5F5F5"
+- Always map transparent backgrounds to solid colors matching the theme
+
 Given these colors: ${JSON.stringify(colors.slice(0, 100))}
 And the desired style "${style}${customDesc ? `: ${customDesc}` : ''}",
-Return ONLY a JSON object mapping each original color (as given) to a hex replacement. Example: {"rgb(255, 0, 0)": "#FF0000", "blue": "#0000FF"}`;
+Return ONLY a JSON object mapping each original color (as given) to a hex replacement. Example: {"rgb(255, 0, 0)": "#FF0000", "blue": "#0000FF", "transparent": "#121212"}`;
   
   console.log(`BG (fetchPalette): Sending prompt (first 100 chars): ${prompt.substring(0, 100)}...`);
-
+  console.log(`BG (fetchPalette): Provider settings:`, providerSettings);
   let colorMap: ColorMap;
   
   switch(provider) {
@@ -252,6 +257,7 @@ Return ONLY a JSON object mapping each original color (as given) to a hex replac
       colorMap = await fetchFromOllama(colors, style, customDesc, providerSettings.ollamaUrl || baseUrl, prompt);
       break;
   }
+
     // Post-process the color map for dark mode to ensure backgrounds are dark
   if (isDarkMode && backgroundColors.length) {
     console.log("BG: Post-processing dark theme to ensure backgrounds are dark");
@@ -273,6 +279,19 @@ Return ONLY a JSON object mapping each original color (as given) to a hex replac
         colorMap[bgColor] = "#121212";
       }
     }
+  }
+
+  // Ensure specific mappings exist for common values
+  if (isDarkMode) {
+    // Add mappings for white/transparent if not already present
+    if (!colorMap["rgb(255, 255, 255)"]) colorMap["rgb(255, 255, 255)"] = "#121212";
+    if (!colorMap["#FFFFFF"]) colorMap["#FFFFFF"] = "#121212";
+    if (!colorMap["#FFF"]) colorMap["#FFF"] = "#121212";
+    if (!colorMap["white"]) colorMap["white"] = "#121212";
+    if (!colorMap["rgba(0, 0, 0, 0)"]) colorMap["rgba(0, 0, 0, 0)"] = "#121212";
+    if (!colorMap["transparent"]) colorMap["transparent"] = "#121212";
+    
+    console.log("BG (fetchPalette): Added missing mappings for white/transparent in dark mode");
   }
   
   return colorMap;

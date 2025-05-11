@@ -121,16 +121,27 @@ function applyColorMap(colorMap: ColorMap): void {
     return; 
   }
   
+  // Check if this is a dark theme
+  const isDarkMode = isDarkTheme(colorMap);
+  
+  // Get mappings for transparent colors
+  const transparentMapping = colorMap["rgba(0, 0, 0, 0)"] || colorMap["transparent"] || 
+      (isDarkMode ? "#121212" : "#FFFFFF");
+  
+  console.log(`CS: Theme type: ${isDarkMode ? "Dark" : "Light"}, Transparent color mapping: ${transparentMapping}`);
+  
+  // Force html and body backgrounds using the transparent mapping
+  const forceBgStyle = document.createElement('style');
+  forceBgStyle.textContent = `
+    html, body {
+      background-color: ${transparentMapping} !important;
+    }
+  `;
+  document.head.appendChild(forceBgStyle);
+  
   isCurrentlyThemed = true;
   console.log("CS: Applying new color map.");
   
-  // Check if this is a dark theme
-  const isDarkMode = isDarkTheme(colorMap);
-  if (isDarkMode) {
-    console.log("CS: Detected dark mode theme - ensuring body/html background is dark");
-    ensureDarkBackgrounds(colorMap);
-  }
-
   function processElement(element: Element) {
     if (!(element instanceof HTMLElement) || element.tagName === 'SCRIPT' || element.tagName === 'STYLE' || element.tagName === 'NOSCRIPT') {
       return;
@@ -276,97 +287,37 @@ function collectColorsWithSemantics(): {colors: string[], semantics: any} {
   const borderColors = new Set<string>();
   const accentColors = new Set<string>();
   const linkColors = new Set<string>();
+  const transparentColors = new Set<string>();
   
   // First collect colors from HTML and BODY elements (important for backgrounds)
   if (document.documentElement) {
     const htmlStyle = getComputedStyle(document.documentElement);
     const bgColor = htmlStyle.backgroundColor;
-    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
-      allColors.add(bgColor);
-      backgroundColors.add(bgColor);
-      console.log("CS: HTML background color:", bgColor);
+    // Include ALL background colors, even transparent ones
+    allColors.add(bgColor);
+    backgroundColors.add(bgColor);
+    if (bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)") {
+      transparentColors.add(bgColor);
     }
+    console.log("CS: HTML background color:", bgColor);
   }
   
   if (document.body) {
     const bodyStyle = getComputedStyle(document.body);
     const bgColor = bodyStyle.backgroundColor;
-    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
-      allColors.add(bgColor);
-      backgroundColors.add(bgColor);
-      console.log("CS: BODY background color:", bgColor);
+    // Include ALL background colors, even transparent ones
+    allColors.add(bgColor);
+    backgroundColors.add(bgColor);
+    if (bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)") {
+      transparentColors.add(bgColor);
     }
+    console.log("CS: BODY background color:", bgColor);
   }
   
-  // Sample elements from the page to avoid performance issues
-  const maxElements = 1000;
-  let count = 0;
+  // Rest of your collection code, but without filtering out transparent colors
+  // For each property you collect, remove the condition that skips transparent colors
   
-  const treeWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-  let node: Element | null;
-  
-  while ((node = treeWalker.nextNode() as Element | null) && count < maxElements) {
-    if (!node || node.tagName === 'SCRIPT' || node.tagName === 'STYLE' || node.tagName === 'NOSCRIPT') continue;
-    count++;
-    
-    const cs = getComputedStyle(node);
-    const tagName = node.tagName.toLowerCase();
-    
-    // Extract color properties
-    const color = cs.color;
-    const bgColor = cs.backgroundColor;
-    const borderTop = cs.borderTopColor;
-    const borderRight = cs.borderRightColor;
-    const borderBottom = cs.borderBottomColor;
-    const borderLeft = cs.borderLeftColor;
-    
-    // Handle text color
-    if (color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)" && color !== "none") {
-      allColors.add(color);
-      textColors.add(color);
-      
-      // Special handling for link colors
-      if (tagName === 'a') {
-        linkColors.add(color);
-      }
-    }
-    
-    // Handle background color
-    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
-      allColors.add(bgColor);
-      
-      // Check if likely to be a main content area
-      const rect = node.getBoundingClientRect();
-      if (rect.width > 200 && rect.height > 100) {
-        backgroundColors.add(bgColor);
-      }
-      
-      // Check if interactive element
-      if (tagName === 'button' || tagName === 'input' || tagName === 'a') {
-        accentColors.add(bgColor);
-      }
-    }
-    
-    // Handle border colors
-    [borderTop, borderRight, borderBottom, borderLeft].forEach(borderColor => {
-      if (borderColor && borderColor !== "transparent" && borderColor !== "rgba(0, 0, 0, 0)" && borderColor !== "none") {
-        allColors.add(borderColor);
-        borderColors.add(borderColor);
-      }
-    });
-  }
-  
-  // Collect colors from main content areas
-  document.querySelectorAll('main, article, .content, .main, #content, #main').forEach(el => {
-    const style = getComputedStyle(el);
-    const bgColor = style.backgroundColor;
-    if (bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "none") {
-      allColors.add(bgColor);
-      backgroundColors.add(bgColor);
-    }
-  });
-  
-  // Return results
+  // Return results with transparent colors as a separate category
   return {
     colors: Array.from(allColors),
     semantics: {
@@ -374,7 +325,8 @@ function collectColorsWithSemantics(): {colors: string[], semantics: any} {
       textColors: Array.from(textColors),
       borderColors: Array.from(borderColors),
       accentColors: Array.from(accentColors),
-      linkColors: Array.from(linkColors)
+      linkColors: Array.from(linkColors),
+      transparentColors: Array.from(transparentColors)
     }
   };
 }
