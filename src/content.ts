@@ -209,6 +209,22 @@ function applyColorMap(colorMap: ColorMap): void {
     }
   }
   
+  // Add a special section for transparent elements
+  if (isDarkMode) {
+    const transparentMapping = colorMap["rgba(0, 0, 0, 0)"] || colorMap["transparent"];
+    if (transparentMapping) {
+      cssRules.push(`
+        /* Handle elements with transparent backgrounds */
+        [style*="background-color: transparent"],
+        [style*="background-color: rgba(0, 0, 0, 0)"],
+        [style*="background: transparent"],
+        [style*="background: rgba(0, 0, 0, 0)"] {
+          background-color: ${transparentMapping} !important;
+        }
+      `);
+    }
+  }
+  
   // Replace existing attribute selector code
   Object.entries(colorMap).forEach(([origColor, newColor]) => {
     if (!origColor || !newColor) return;
@@ -419,47 +435,85 @@ function collectColorsWithSemantics(): {colors: string[], semantics: any} {
   const accentColors = new Set<string>();
   const linkColors = new Set<string>();
   const transparentColors = new Set<string>();
+  const trueBackgrounds = new Map<string, string>(); // Map transparent to actual colors
   
-  // First collect colors from HTML and BODY elements (important for backgrounds)
-  if (document.documentElement) {
-    const htmlStyle = getComputedStyle(document.documentElement);
-    const bgColor = htmlStyle.backgroundColor;
-    // Include ALL background colors, even transparent ones
-    allColors.add(bgColor);
-    backgroundColors.add(bgColor);
-    if (bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)") {
-      transparentColors.add(bgColor);
-    }
-    console.log("CS: HTML background color:", bgColor);
+  // First get the base background colors
+  const htmlBgColor = getComputedStyle(document.documentElement).backgroundColor;
+  const bodyBgColor = getComputedStyle(document.body).backgroundColor;
+  
+  // Add HTML background (even if transparent)
+  allColors.add(htmlBgColor);
+  backgroundColors.add(htmlBgColor);
+  if (htmlBgColor === "transparent" || htmlBgColor === "rgba(0, 0, 0, 0)") {
+    transparentColors.add(htmlBgColor);
+    // For HTML, the true background is usually white
+    trueBackgrounds.set(htmlBgColor, "rgb(255, 255, 255)"); 
   }
   
-  if (document.body) {
-    const bodyStyle = getComputedStyle(document.body);
-    const bgColor = bodyStyle.backgroundColor;
-    // Include ALL background colors, even transparent ones
-    allColors.add(bgColor);
-    backgroundColors.add(bgColor);
-    if (bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)") {
-      transparentColors.add(bgColor);
-    }
-    console.log("CS: BODY background color:", bgColor);
+  // Add body background
+  allColors.add(bodyBgColor);
+  backgroundColors.add(bodyBgColor);
+  if (bodyBgColor === "transparent" || bodyBgColor === "rgba(0, 0, 0, 0)") {
+    transparentColors.add(bodyBgColor);
+    // Body's true background is the HTML background or white
+    const trueBodyBg = (htmlBgColor !== "transparent" && htmlBgColor !== "rgba(0, 0, 0, 0)") ? 
+                       htmlBgColor : "rgb(255, 255, 255)";
+    trueBackgrounds.set(bodyBgColor, trueBodyBg);
   }
   
-  // Rest of your collection code, but without filtering out transparent colors
-  // For each property you collect, remove the condition that skips transparent colors
+  // Sample important elements to find text/background relationships
+  const colorRelationships: { text: string; background: string; element: string; transparent: boolean }[] = [];
+  const importantElements = [
+    document.body,
+    ...Array.from(document.querySelectorAll('main, article, header, nav, .content, h1, h2, a, button, input, p')).slice(0, 30)
+  ];
   
-  // Extract colors from stylesheets
-  console.log("CS: Extracting colors from stylesheets");
-  const stylesheetColors = extractColorsFromStylesheets();
-  console.log(`CS: Found ${stylesheetColors.size} colors in stylesheets`);
-  
-  // Add stylesheet colors to our collections
-  stylesheetColors.forEach(color => {
-    allColors.add(color);
-    // For now we don't know what these colors are used for
+  importantElements.forEach(element => {
+    if (!(element instanceof HTMLElement)) return;
+    
+    const computedStyle = getComputedStyle(element);
+    const textColor = computedStyle.color;
+    let bgColor = computedStyle.backgroundColor;
+    
+    // Add colors to collections
+    if (textColor) {
+      allColors.add(textColor);
+      textColors.add(textColor);
+    }
+    
+    if (bgColor) {
+      allColors.add(bgColor);
+      backgroundColors.add(bgColor);
+      
+      // If transparent, find and store the true background
+      if (bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)") {
+        transparentColors.add(bgColor);
+        const trueBg = getActualBackgroundColor(element);
+        trueBackgrounds.set(bgColor, trueBg);
+        
+        // Also add the true background to our color collection
+        allColors.add(trueBg);
+        backgroundColors.add(trueBg);
+        
+        // Use the true background for the relationship
+        bgColor = trueBg;
+      }
+    }
+    
+    // Store the text/background relationship
+    if (textColor && bgColor) {
+      colorRelationships.push({
+        text: textColor,
+        background: bgColor,
+        element: element.tagName.toLowerCase(),
+        transparent: bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)"
+      });
+    }
   });
   
-  // Return results with transparent colors as a separate category
+  // Extract colors from stylesheets as before...
+  
+  // Return enhanced semantics with relationships and true backgrounds
   return {
     colors: Array.from(allColors),
     semantics: {
@@ -468,9 +522,50 @@ function collectColorsWithSemantics(): {colors: string[], semantics: any} {
       borderColors: Array.from(borderColors),
       accentColors: Array.from(accentColors),
       linkColors: Array.from(linkColors),
-      transparentColors: Array.from(transparentColors)
+      transparentColors: Array.from(transparentColors),
+      trueBackgrounds: Object.fromEntries(trueBackgrounds),
+      relationships: colorRelationships.slice(0, 10)
     }
   };
+}
+
+/**
+ * Get the actual visible background color of an element, accounting for transparency
+ * by traversing up the DOM tree to find what's showing through
+ */
+function getActualBackgroundColor(element: HTMLElement): string {
+  const computedStyle = window.getComputedStyle(element);
+  const bgColor = computedStyle.backgroundColor;
+  
+  // If the background is fully transparent, look at parent elements
+  if (bgColor === "rgba(0, 0, 0, 0)" || bgColor === "transparent") {
+    // Traverse up to find the first non-transparent parent
+    let currentElement = element.parentElement;
+    while (currentElement) {
+      const parentBgColor = window.getComputedStyle(currentElement).backgroundColor;
+      if (parentBgColor !== "rgba(0, 0, 0, 0)" && parentBgColor !== "transparent") {
+        return parentBgColor; // Found a non-transparent parent
+      }
+      currentElement = currentElement.parentElement;
+    }
+    
+    // If we reach the top without finding a color, use document/body background
+    const htmlBg = window.getComputedStyle(document.documentElement).backgroundColor;
+    if (htmlBg !== "rgba(0, 0, 0, 0)" && htmlBg !== "transparent") {
+      return htmlBg;
+    }
+    
+    const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+    if (bodyBg !== "rgba(0, 0, 0, 0)" && bodyBg !== "transparent") {
+      return bodyBg;
+    }
+    
+    // Last resort: assume white
+    return "rgb(255, 255, 255)";
+  }
+  
+  // Not transparent, return the actual color
+  return bgColor;
 }
 
 // Improve the message listener to be more robust
@@ -607,3 +702,42 @@ try {
     }
   }, 5000);
 })();
+
+// Add this after your verifyContentScriptRunning function
+
+function enableDebugMode() {
+  // Create debug overlay
+  const debugPanel = document.createElement('div');
+  debugPanel.style.cssText = 'position:fixed;bottom:0;right:0;background:rgba(0,0,0,0.8);color:white;padding:10px;z-index:999999;font-size:12px;max-height:30vh;overflow:auto;';
+  debugPanel.textContent = 'Themer Debug:';
+  document.body.appendChild(debugPanel);
+  
+  // Add debug log function
+  window.themerDebug = (msg: string, data?: any) => {
+    const logItem = document.createElement('div');
+    logItem.textContent = `${new Date().toLocaleTimeString()}: ${msg}`;
+    if (data) {
+      console.log(`THEMER DEBUG: ${msg}`, data);
+    }
+    debugPanel.appendChild(logItem);
+    
+    // Keep only last 20 messages
+    while (debugPanel.childNodes.length > 21) {
+      debugPanel.removeChild(debugPanel.childNodes[1]);
+    }
+  };
+  
+  window.themerDebug('Debug mode enabled');
+}
+
+// Enable with "?themer-debug=1" in URL
+if (window.location.search.includes('themer-debug=1')) {
+  setTimeout(enableDebugMode, 1000);
+}
+
+// Add to global window for debugging
+declare global {
+  interface Window {
+    themerDebug?: (msg: string, data?: any) => void;
+  }
+}

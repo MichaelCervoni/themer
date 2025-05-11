@@ -203,19 +203,43 @@ async function fetchPalette(colors: string[], style: string, customDesc?: string
     if (linkColors.length) {
       semanticInfo += `Link colors: ${JSON.stringify(linkColors.slice(0, 3))}\n`;
     }
+    
+    // Add true background information
+    if (semantics?.trueBackgrounds && Object.keys(semantics.trueBackgrounds).length > 0) {
+      semanticInfo += "True backgrounds for transparent elements:\n";
+      Object.entries(semantics.trueBackgrounds).forEach(([transparent, realBg]) => {
+        semanticInfo += `- ${transparent} actually shows as ${realBg}\n`;
+      });
+    }
+    
+    // Add color relationships
+    if (semantics?.relationships?.length > 0) {
+      semanticInfo += "Color relationships (colors that need good contrast):\n";
+      semantics.relationships.forEach((rel: ColorRelationship, i: number) => {
+        semanticInfo += `- Text "${rel.text}" on background "${rel.background}" (${rel.element})\n`;
+      });
+    }
   }
   
   // Add specific guidance for dark/light modes
   let themeGuidance = "";
   
-  if (isDarkMode) {
+  if (isDarkMode || style.toLowerCase().includes('dark') || style.toLowerCase().includes('black') || style.toLowerCase().includes('neon')) {
     themeGuidance = `
-CRITICAL: This is a dark theme. Follow these rules strictly:
-1. ALL background colors must be dark (e.g. #121212, #1A1A1A, #242424)
-2. Text colors must be light (e.g. #E0E0E0, #CCCCCC)
-3. Primary background colors MUST be very dark (around #121212-#191919)
-4. Maintain contrast ratios to ensure readability
-5. If original backgrounds are light, they MUST be mapped to dark colors
+CRITICAL: This is a dark theme. Follow these WCAG accessibility rules STRICTLY:
+1. ALL background colors must be dark (#000000 to #333333 range)
+2. ALL text colors must be very light (#E0E0E0 to #FFFFFF) or bright neon
+3. NEVER map any text color to anything darker than #AAAAAA
+4. NEVER use similar colors for text and its background
+5. Maintain AT LEAST 4.5:1 contrast ratio between ANY text and ANY background
+6. The darker the background, the brighter the text must be
+7. If instructed to create a "neon" theme, use bright neon colors ONLY for text and accents, NEVER for large backgrounds
+
+When making color decisions:
+- Text that was originally dark → Make very bright (#FFFFFF, #E0E0E0) or neon (#00FFFF, #39FF14, etc.)
+- Text that was originally light → Keep light or make neon
+- Backgrounds that were originally light → Make very dark (#0A0A0A, #121212)
+- Backgrounds that were originally dark → Keep dark or make slightly lighter
 `;
   } 
   else if (isLightMode) {
@@ -232,16 +256,13 @@ CRITICAL: This is a light theme. Follow these rules strictly:
 
 ${semanticInfo}${themeGuidance}
 
-IMPORTANT: For transparent colors like "rgba(0, 0, 0, 0)" or "transparent":
-- In dark themes: Map them to a dark color like "#121212" or "#181818"
-- In light themes: Map them to a light color like "#FFFFFF" or "#F5F5F5"
-- Always map transparent backgrounds to solid colors matching the theme
-
-Given these colors: ${JSON.stringify(colors.slice(0, 100))}
+Given these colors: ${JSON.stringify(colors)}
 And the desired style "${style}${customDesc ? `: ${customDesc}` : ''}",
-Return ONLY a JSON object mapping each original color (as given) to a hex replacement. Example: {"rgb(255, 0, 0)": "#FF0000", "blue": "#0000FF", "transparent": "#121212"}`;
+Colors should be mapped to the new style while maintaining contrast and readability. If the starting theme is light, most colors that are light should be replaced with darker colors, and vice versa.
+Pay close attention to the color relationships and ensure that text colors are readable against their backgrounds.
+Return ONLY a JSON object mapping each original color (as given) to a hex replacement. Example: {"rgb(255, 0, 0)": "#FF0000", "blue": "#0000FF"}`;
   
-  console.log(`BG (fetchPalette): Sending prompt (first 100 chars): ${prompt.substring(0, 100)}...`);
+  console.log(`BG (fetchPalette): Sending prompt: ${prompt}`);
   console.log(`BG (fetchPalette): Provider settings:`, providerSettings);
   let colorMap: ColorMap;
   
@@ -654,4 +675,12 @@ try {
   }
 } catch (e) {
   console.warn("BG: Context menus API not available:", e);
+}
+
+// Add this interface near the top of your background.ts file
+interface ColorRelationship {
+  text: string;
+  background: string;
+  element: string;
+  transparent: boolean;
 }

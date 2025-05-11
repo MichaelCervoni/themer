@@ -45,7 +45,8 @@ export async function fetchFromOpenAI(colors: string[], style: string, customDes
   console.log(`BG (fetchFromOpenAI): Sending request with ${colors.length} colors`);
   
   const requestBody = {
-    model: "gpt-4.1-mini",
+    // model: "gpt-4.1-mini",
+    model: "o4-mini",
     messages: [{ role: "user", content: prompt }]
   };
   
