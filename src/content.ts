@@ -143,111 +143,175 @@ function applyColorMap(colorMap: ColorMap): void {
   // Check if this is a dark theme
   const isDarkMode = isDarkTheme(colorMap);
   
-  // Get mappings for transparent colors
-  const transparentMapping = colorMap["rgba(0, 0, 0, 0)"] || colorMap["transparent"] || 
-      (isDarkMode ? "#121212" : "#FFFFFF");
+  // Create a style element for our theme
+  const styleElement = document.createElement('style');
+  styleElement.id = 'themer-global-styles';
   
-  console.log(`CS: Theme type: ${isDarkMode ? "Dark" : "Light"}, Transparent color mapping: ${transparentMapping}`);
+  // Start building CSS rules
+  let cssRules = [];
   
-  // Force html and body backgrounds using the transparent mapping
-  const forceBgStyle = document.createElement('style');
-  forceBgStyle.textContent = `
-    html, body {
-      background-color: ${transparentMapping} !important;
+  // Add universal rules for HTML and BODY in dark mode
+  if (isDarkMode) {
+    // Get the colors for dark backgrounds and light text
+    const darkBg = colorMap["rgb(255, 255, 255)"] || colorMap["#FFFFFF"] || colorMap["#FFF"] || colorMap["white"] || "#121212";
+    const lightText = colorMap["rgb(0, 0, 0)"] || colorMap["#000000"] || colorMap["#000"] || colorMap["black"] || "#E0E0E0";
+    const transparentBg = colorMap["rgba(0, 0, 0, 0)"] || colorMap["transparent"] || darkBg;
+    
+    console.log(`CS: Dark mode detected. Using base colors - Background: ${darkBg}, Text: ${lightText}, Transparent: ${transparentBg}`);
+    
+    // Add basic dark mode styles
+    cssRules.push(`
+      /* Force dark theme basics */
+      html, body {
+        background-color: ${darkBg} !important;
+        color: ${lightText} !important;
+      }
+    `);
+
+    // Inside the isDarkMode condition in applyColorMap
+    if (isDarkMode) {
+      // After the existing html/body styles
+      cssRules.push(`
+        /* Dark mode fallbacks for text (catch black text not explicitly mapped) */
+        p, span, div, h1, h2, h3, h4, h5, h6, a, li, td, th, label, input, textarea {
+          color: ${lightText} !important;
+        }
+        
+        /* Handle search input text */
+        input[type="text"], input[type="search"], input:not([type]) {
+          color: ${lightText} !important;
+          background-color: #2A2A2A !important;
+        }
+        
+        /* Force contrast for links */
+        a:link, a:visited {
+          color: #8CB4FF !important;
+        }
+      `);
+
+      // Inside the isDarkMode condition in applyColorMap, after dark mode fallbacks
+      cssRules.push(`
+        /* CSS Variable overrides for dark mode */
+        :root {
+          --text-color: ${lightText} !important;
+          --body-color: ${lightText} !important;
+          --body-bg: ${darkBg} !important;
+          --bg-color: ${darkBg} !important;
+          --background: ${darkBg} !important;
+          --background-color: ${darkBg} !important;
+          
+          /* Material & Bootstrap variables */
+          --mat-background-color: ${darkBg} !important;
+          --bs-body-bg: ${darkBg} !important;
+          --bs-body-color: ${lightText} !important;
+        }
+      `);
     }
-  `;
-  document.head.appendChild(forceBgStyle);
+  }
   
-  isCurrentlyThemed = true;
-  console.log("CS: Applying new color map.");
+  // Replace existing attribute selector code
+  Object.entries(colorMap).forEach(([origColor, newColor]) => {
+    if (!origColor || !newColor) return;
+    
+    // Clean the color strings for CSS
+    const cleanOrig = origColor.replace(/\s+/g, ' ').trim();
+    const colorId = origColor.replace(/[^a-z0-9]/gi, '-');
+    
+    // Add more powerful selectors
+    cssRules.push(`
+      /* Color replacements for ${cleanOrig} */
+      [style*="color: ${cleanOrig}"] { color: ${newColor} !important; }
+      [style*="background-color: ${cleanOrig}"] { background-color: ${newColor} !important; }
+      [style*="background: ${cleanOrig}"] { background: ${newColor} !important; }
+      [style*="border-color: ${cleanOrig}"] { border-color: ${newColor} !important; }
+      [style*="border: ${cleanOrig}"] { border-color: ${newColor} !important; }
+      
+      /* Target elements that might use this color but aren't caught by attribute selectors */
+      .themer-force-${colorId} { color: ${newColor} !important; background-color: ${newColor} !important; }
+    `);
+  });
   
-  function processElement(element: Element) {
-    if (!(element instanceof HTMLElement) || element.tagName === 'SCRIPT' || element.tagName === 'STYLE' || element.tagName === 'NOSCRIPT') {
-      return;
+  // Create general type selectors for common elements
+  if (isDarkMode) {
+    cssRules.push(`
+      /* Common element type selectors */
+      input, textarea, select, button {
+        background-color: #2A2A2A !important;
+        color: #E0E0E0 !important;
+        border-color: #444 !important;
+      }
+    `);
+  }
+  
+  // Combine all rules
+  styleElement.textContent = cssRules.join('\n');
+  
+  // Add an observer to make sure our style stays in the document
+  const observer = new MutationObserver(() => {
+    if (!document.head.contains(styleElement)) {
+      console.log("CS: Style element was removed, re-adding it");
+      document.head.appendChild(styleElement);
     }
+  });
+  
+  // Add the style element and start observing
+  document.head.appendChild(styleElement);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  
+  // Save the observer so we can disconnect it later
+  currentObserver = observer;
+  
+  // Apply inline styles to existing elements
+  applyInlineStyles(colorMap);
+  
+  console.log("CS: Global theme styles applied successfully");
+}
+
+/**
+ * Apply inline styles to elements for more complete coverage
+ */
+function applyInlineStyles(colorMap: ColorMap): void {
+  console.log("CS: Applying inline styles for better coverage");
+  
+  const elementsToProcess = [
+    document.documentElement,
+    document.body,
+    ...Array.from(document.querySelectorAll('div, main, article, section, header, footer, aside'))
+  ];
+  
+  // Process each element
+  elementsToProcess.forEach(element => {
+    if (!(element instanceof HTMLElement)) return;
     
     const htmlElement = element as HTMLElement;
     const computedStyle = getComputedStyle(htmlElement);
-
-    // Special handling for html and body in dark mode
-    const isHtmlOrBody = element === document.documentElement || element === document.body;
     
-    // Force dark background on html/body if needed
-    if (isDarkMode && isHtmlOrBody) {
-      const currentBgColor = computedStyle.backgroundColor;
-      const newColor = colorMap[currentBgColor];
-      
-      if (!newColor && currentBgColor !== "rgba(0, 0, 0, 0)" && currentBgColor !== "transparent") {
-        // Add to colorMap if not already there
-        colorMap[currentBgColor] = "#121212";
-        console.log(`CS: Force-added dark mapping for ${element.tagName} background:`, currentBgColor, "→ #121212");
+    // Process background color
+    const bgColor = computedStyle.backgroundColor;
+    const newBgColor = colorMap[bgColor];
+    
+    if (newBgColor) {
+      const origStyle = originalInlineStyles.get(htmlElement) || {};
+      if (origStyle.backgroundColor === undefined) {
+        origStyle.backgroundColor = htmlElement.style.backgroundColor || "";
       }
+      htmlElement.style.setProperty('background-color', newBgColor, 'important');
+      originalInlineStyles.set(htmlElement, origStyle);
     }
-
-    // Normal property processing
-    const propertiesToProcess = [
-      { computed: computedStyle.color, inlineProp: 'color' as keyof TrackedStyleProperties },
-      { computed: computedStyle.backgroundColor, inlineProp: 'backgroundColor' as keyof TrackedStyleProperties },
-      { computed: computedStyle.borderColor, inlineProp: 'borderColor' as keyof TrackedStyleProperties },
-      { computed: computedStyle.borderTopColor, inlineProp: 'borderTopColor' as keyof TrackedStyleProperties },
-      { computed: computedStyle.borderRightColor, inlineProp: 'borderRightColor' as keyof TrackedStyleProperties },
-      { computed: computedStyle.borderBottomColor, inlineProp: 'borderBottomColor' as keyof TrackedStyleProperties },
-      { computed: computedStyle.borderLeftColor, inlineProp: 'borderLeftColor' as keyof TrackedStyleProperties },
-    ];
-
-    const originalStylesForThisElement = originalInlineStyles.get(htmlElement) || {};
-    let modifiedOriginals = false;
-
-    propertiesToProcess.forEach(item => {
-      const newColor = colorMap[item.computed];
-      
-      // Extra debugging for background colors of html/body
-      if (item.inlineProp === 'backgroundColor' && (htmlElement === document.body || htmlElement === document.documentElement)) {
-        console.log(`CS_DEBUG: BGColor Check for ${htmlElement.tagName}:`, {
-          originalColor: item.computed,
-          hasMapping: newColor ? true : false,
-          newColor: newColor || 'none'
-        });
+    
+    // Process text color
+    const textColor = computedStyle.color;
+    const newTextColor = colorMap[textColor];
+    
+    if (newTextColor) {
+      const origStyle = originalInlineStyles.get(htmlElement) || {};
+      if (origStyle.color === undefined) {
+        origStyle.color = htmlElement.style.color || "";
       }
-
-      if (newColor && item.computed !== newColor) { 
-        if (originalStylesForThisElement[item.inlineProp] === undefined) {
-          originalStylesForThisElement[item.inlineProp] = htmlElement.style[item.inlineProp as any] || ""; 
-          modifiedOriginals = true;
-        }
-        htmlElement.style.setProperty(item.inlineProp as string, newColor, 'important');
-      }
-    });
-
-    if (modifiedOriginals) {
-      originalInlineStyles.set(htmlElement, originalStylesForThisElement);
+      htmlElement.style.setProperty('color', newTextColor, 'important');
+      originalInlineStyles.set(htmlElement, origStyle);
     }
-  }
-
-  // Process html and body elements first for better debugging visibility
-  if (document.documentElement) processElement(document.documentElement);
-  if (document.body) {
-    processElement(document.body);
-    document.querySelectorAll('body *').forEach(el => processElement(el));
-  }
-
-  // Set up mutation observer to process new elements
-  currentObserver = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      mutation.addedNodes.forEach((node) => {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          processElement(node as Element); 
-          (node as Element).querySelectorAll('*').forEach(childEl => processElement(childEl));
-        }
-      });
-    });
   });
-  
-  if (document.documentElement) { 
-    currentObserver.observe(document.documentElement, { childList: true, subtree: true });
-  }
-  
-  console.log("CS: Color map applied and observer set up.");
 }
 
 /**
@@ -296,6 +360,54 @@ function collectColors(): string[] {
   return [...colors];
 }
 
+// Add after collectColors() function (around line 285)
+/**
+ * Extract colors from all accessible stylesheets
+ */
+function extractColorsFromStylesheets(): Set<string> {
+  const extractedColors = new Set<string>();
+  
+  try {
+    // Process all stylesheets
+    for (let i = 0; i < document.styleSheets.length; i++) {
+      try {
+        const sheet = document.styleSheets[i];
+        
+        // Skip cross-origin stylesheets we can't access
+        if (sheet.href && !sheet.href.startsWith(window.location.origin) && !sheet.href.startsWith('moz-extension://')) {
+          continue;
+        }
+        
+        // Access and process the rules
+        const rules = sheet.cssRules || sheet.rules;
+        if (!rules) continue;
+        
+        for (let j = 0; j < rules.length; j++) {
+          const rule = rules[j];
+          
+          // Handle standard style rules
+          if (rule instanceof CSSStyleRule) {
+            const style = rule.style;
+            // Check all color-related properties
+            ['color', 'background-color', 'border-color', 'background'].forEach(prop => {
+              const value = style.getPropertyValue(prop);
+              if (value && !value.includes('var(') && value !== 'transparent' && value !== 'inherit' && value !== 'initial') {
+                extractedColors.add(value);
+              }
+            });
+          }
+        }
+      } catch (e) {
+        // CORS issues with external stylesheets are expected
+      }
+    }
+  } catch (e) {
+    console.error("CS: Error extracting colors from stylesheets:", e);
+  }
+  
+  return extractedColors;
+}
+
 /**
  * Collect page colors with semantic information
  */
@@ -335,6 +447,17 @@ function collectColorsWithSemantics(): {colors: string[], semantics: any} {
   
   // Rest of your collection code, but without filtering out transparent colors
   // For each property you collect, remove the condition that skips transparent colors
+  
+  // Extract colors from stylesheets
+  console.log("CS: Extracting colors from stylesheets");
+  const stylesheetColors = extractColorsFromStylesheets();
+  console.log(`CS: Found ${stylesheetColors.size} colors in stylesheets`);
+  
+  // Add stylesheet colors to our collections
+  stylesheetColors.forEach(color => {
+    allColors.add(color);
+    // For now we don't know what these colors are used for
+  });
   
   // Return results with transparent colors as a separate category
   return {
