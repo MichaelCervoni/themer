@@ -1,5 +1,5 @@
 // Add this at the very top of the file
-console.log("THEMER CONTENT SCRIPT: Loaded at", new Date().toISOString());
+console.log("THEMER CONTENT SCRIPT: Initial load at", new Date().toISOString(), window.location.href);
 
 // Verify browser.runtime is available
 console.log("THEMER CONTENT SCRIPT: browser.runtime available:", !!browser.runtime);
@@ -24,11 +24,6 @@ import type { ColorMap } from "./types";
 
 // Import dev console utilities (will be tree-shaken in production)
 import * as consoleUtils from './utils/console-utils';
-
-console.log("CS: Content script loaded at", new Date().toISOString());
-
-// Add this at the top of the file to ensure it runs
-console.log("CS: Content script LOADED at", new Date().toISOString());
 
 // Define a type for the style properties we are tracking
 type TrackedStyleProperties = {
@@ -358,54 +353,30 @@ function collectColorsWithSemantics(): {colors: string[], semantics: any} {
 // Improve the message listener to be more robust
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   try {
-    console.log(`CS: Received message: ${message.type}`, message);
+    console.log(`THEMER: Received message: ${message.type}`, message);
     
     if (message.type === "APPLY_MAP") {
-      console.log(`CS (APPLY_MAP handler): Received APPLY_MAP. Payload items: ${Object.keys(message.payload).length}. Applying...`);
-      applyColorMap(message.payload);
-      sendResponse({success: true});
-      return true;  // Indicates async response
-    }
-    
-    if (message.type === "GET_COLORS") {
-      const colorInfo = collectColorsWithSemantics();
-      console.log("CS (GET_COLORS handler): Sending colors:", colorInfo.colors.length);
-      sendResponse({
-        colors: colorInfo.colors,
-        semantics: colorInfo.semantics
-      });
-      return true; 
-    }
-    
-    console.warn("CS: Unknown message type received by content script:", message.type);
-    return false;
-  } catch (error) {
-    console.error("CS: Error handling message:", error);
-    sendResponse({success: false, error: String(error)});
-    return true;
-  }
-});
-
-// Set up a robust message listener
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  try {
-    console.log(`THEMER CONTENT SCRIPT: Received message type: ${message.type}`);
-    
-    if (message.type === "APPLY_MAP") {
-      console.log(`THEMER CONTENT SCRIPT: Applying color map with ${Object.keys(message.payload).length} colors`);
+      console.log(`THEMER: Applying color map with ${Object.keys(message.payload).length} colors`);
       applyColorMap(message.payload);
       sendResponse({success: true});
       return true;
     }
     
     if (message.type === "GET_COLORS") {
-      // Your existing GET_COLORS handling
+      const colorInfo = collectColorsWithSemantics();
+      console.log("THEMER: Sending colors:", colorInfo.colors.length);
+      sendResponse({
+        colors: colorInfo.colors,
+        semantics: colorInfo.semantics
+      });
+      return true;
     }
     
+    console.warn("THEMER: Unknown message type:", message.type);
     sendResponse({success: false, error: "Unknown message type"});
     return true;
   } catch (error) {
-    console.error("THEMER CONTENT SCRIPT: Error processing message:", error);
+    console.error("THEMER: Error handling message:", error);
     sendResponse({success: false, error: String(error)});
     return true;
   }
@@ -497,3 +468,19 @@ try {
   // Silently ignore errors in production builds
   console.debug('[Themer] Could not initialize development utilities:', e);
 }
+
+// Themer Activity Indicator
+(function verifyContentScriptRunning() {
+  const indicator = document.createElement('div');
+  indicator.id = 'themer-content-script-indicator';
+  indicator.style.cssText = 'position:fixed;top:0;right:0;background:red;color:white;padding:2px 5px;z-index:999999;font-size:10px;';
+  indicator.textContent = 'Themer Active';
+  document.documentElement.appendChild(indicator);
+  
+  // Hide after 5 seconds
+  setTimeout(() => {
+    if (indicator && indicator.parentNode) {
+      indicator.parentNode.removeChild(indicator);
+    }
+  }, 5000);
+})();
