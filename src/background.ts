@@ -1,6 +1,6 @@
 // background.ts
 import type { ColorMap } from "./types";
-import { isLightColor, getDarkerVersion } from "./utils/color-utils";
+import { isLightColor, getDarkerVersion, hexToRgb, getLuminance, getContrastRatio } from "./utils/color-utils";
 import { fetchFromOllama } from "./api/ollama-api";
 import { fetchFromOpenAI } from "./api/openai-api";
 import { fetchFromClaude } from "./api/claude-api";
@@ -164,6 +164,121 @@ async function handleRefreshPalette(settings: any, tab: browser.tabs.Tab): Promi
   }
 }
 
+// Helper function to find a suitable replacement color from the current palette
+function findBestReplacementFromPalette(
+  currentColorMap: ColorMap,
+  targetLightness: 'light' | 'dark'
+): string | null {
+  let bestCandidate: string | null = null;
+  // For 'light' target, we want highest luminance. For 'dark', lowest.
+  let bestScore: number = targetLightness === 'light' ? -1 : 2;
+
+  for (const mappedColor of Object.values(currentColorMap)) {
+    if (!mappedColor || !mappedColor.startsWith('#')) continue; // Process only valid hex colors
+
+    try {
+      const rgb = hexToRgb(mappedColor); // Assuming hexToRgb is available
+      if (!rgb) continue;
+
+      const luminance = getLuminance(rgb[0], rgb[1], rgb[2]); // Assuming getLuminance is available
+
+      if (targetLightness === 'light') {
+        // Check if color is light (luminance > 0.5, or use your isLightColor logic)
+        // and if it's 'lighter' than current best candidate
+        if (luminance > 0.5 && luminance > bestScore) {
+          bestScore = luminance;
+          bestCandidate = mappedColor;
+        }
+      } else { // targetLightness === 'dark'
+        // Check if color is dark (luminance <= 0.5)
+        // and if it's 'darker' than current best candidate
+        if (luminance <= 0.5 && luminance < bestScore) {
+          bestScore = luminance;
+          bestCandidate = mappedColor;
+        }
+      }
+    } catch (e) {
+      // console.warn(`BG: Could not process color ${mappedColor} for replacement search:`, e);
+    }
+  }
+  return bestCandidate;
+}
+
+// Updated function to fix contrast issues
+function fixContrastIssues(colorMap: ColorMap, semantics?: any): ColorMap {
+  if (!semantics?.relationships?.length) {
+    // console.log("BG (fixContrastIssues): No relationships to process.");
+    return colorMap;
+  }
+
+  const fixedMap = { ...colorMap };
+  // console.log("BG (fixContrastIssues): Starting contrast checks on relationships.");
+
+  semantics.relationships.forEach((rel: ColorRelationship) => {
+    const originalTextColor = rel.text;
+    const originalBgColorString = rel.background;
+
+    let mappedTextColor = fixedMap[originalTextColor];
+    let effectiveMappedBgColor: string | undefined;
+
+    if (rel.transparent && semantics.trueBackgrounds) {
+      const actualOriginalUnderlyingBg = semantics.trueBackgrounds[originalBgColorString];
+      if (actualOriginalUnderlyingBg && fixedMap[actualOriginalUnderlyingBg]) {
+        effectiveMappedBgColor = fixedMap[actualOriginalUnderlyingBg];
+      } else {
+        effectiveMappedBgColor = fixedMap[originalBgColorString];
+      }
+    } else {
+      effectiveMappedBgColor = fixedMap[originalBgColorString];
+    }
+
+    if (mappedTextColor && effectiveMappedBgColor && mappedTextColor.startsWith('#') && effectiveMappedBgColor.startsWith('#')) {
+      try {
+        const textRGB = hexToRgb(mappedTextColor);
+        const bgRGB = hexToRgb(effectiveMappedBgColor);
+
+        if (!textRGB || !bgRGB) return;
+
+        const contrast = getContrastRatio(textRGB, bgRGB); // Assuming getContrastRatio is available
+
+        if (contrast < 4.5) {
+          console.warn(`BG (fixContrastIssues): Contrast issue for element '${rel.element}'. Text "${mappedTextColor}" (from "${originalTextColor}") on BG "${effectiveMappedBgColor}" (from "${originalBgColorString}"). Contrast: ${contrast.toFixed(2)}:1`);
+
+          const bgIsEffectivelyLight = isLightColor(effectiveMappedBgColor); // Assuming isLightColor is available
+          let replacementTextColor: string | null = null;
+
+          if (bgIsEffectivelyLight) { // Background is light, text needs to be dark
+            replacementTextColor = findBestReplacementFromPalette(fixedMap, 'dark');
+            if (!replacementTextColor) {
+              replacementTextColor = "#121212"; // Ultimate fallback if no suitable dark color in palette
+              console.warn(`BG (fixContrastIssues): No suitable dark color in palette. Falling back to ${replacementTextColor}.`);
+            }
+          } else { // Background is dark, text needs to be light
+            replacementTextColor = findBestReplacementFromPalette(fixedMap, 'light');
+            if (!replacementTextColor) {
+              replacementTextColor = "#E0E0E0"; // Ultimate fallback if no suitable light color in palette
+              console.warn(`BG (fixContrastIssues): No suitable light color in palette. Falling back to ${replacementTextColor}.`);
+            }
+          }
+
+          if (replacementTextColor && replacementTextColor !== mappedTextColor) {
+            fixedMap[originalTextColor] = replacementTextColor;
+            console.log(`BG (fixContrastIssues): Corrected. New text color for "${originalTextColor}" on element '${rel.element}' is "${replacementTextColor}".`);
+          } else if (replacementTextColor === mappedTextColor) {
+            console.log(`BG (fixContrastIssues): Attempted correction for "${originalTextColor}" on '${rel.element}', but best replacement ("${replacementTextColor}") is same as current. No change.`);
+          } else {
+             console.log(`BG (fixContrastIssues): Attempted correction for "${originalTextColor}" on '${rel.element}', but no suitable replacement found from palette and no fallback triggered. No change to text color "${mappedTextColor}".`);
+          }
+        }
+      } catch (e) {
+        console.error(`BG (fixContrastIssues): Error during contrast post-processing for relationship (text: ${originalTextColor}, bg: ${originalBgColorString}, element: ${rel.element}):`, e);
+      }
+    }
+  });
+  // console.log("BG (fixContrastIssues): Finished contrast checks.");
+  return fixedMap;
+}
+
 async function fetchPalette(colors: string[], style: string, customDesc?: string, apiKey?: string, baseUrl?: string, semantics?: any): Promise<ColorMap> {
   const providerSettings = await browser.storage.local.get(STORAGE_KEYS.PROVIDER_SETTINGS);
   const provider = providerSettings.provider || "openai"; // Default to OpenAI instead of Ollama
@@ -314,6 +429,11 @@ Return ONLY a JSON object mapping each original color (as given) to a hex replac
     
     console.log("BG (fetchPalette): Added missing mappings for white/transparent in dark mode");
   }
+
+  // Apply the new contrast fixing logic
+  // This should come AFTER the AI has generated the map and AFTER basic dark mode adjustments for backgrounds.
+  console.log("BG (fetchPalette): Applying contrast fixing based on semantic relationships.");
+  colorMap = fixContrastIssues(colorMap, semantics);
   
   return colorMap;
 }

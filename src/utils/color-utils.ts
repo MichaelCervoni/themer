@@ -132,3 +132,61 @@ export function isDarkTheme(colorMap: Record<string, string>): boolean {
   // If more than 30% of colors are dark, consider it a dark theme
   return totalColors > 0 && (darkColorCount / totalColors) > 0.3;
 }
+
+/**
+ * Convert a hex color string to an RGB array.
+ * @param hex The hex color string (e.g., "#RRGGBB").
+ * @returns An array [r, g, b] or null if conversion fails.
+ */
+export function hexToRgb(hex: string): [number, number, number] | null {
+  if (!hex || typeof hex !== 'string') {
+    return null;
+  }
+  const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+  hex = hex.replace(shorthandRegex, (m, r, g, b) => {
+    return r + r + g + g + b + b;
+  });
+
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result
+    ? [
+        parseInt(result[1], 16),
+        parseInt(result[2], 16),
+        parseInt(result[3], 16),
+      ]
+    : null;
+}
+
+/**
+ * Calculate the relative luminance of an RGB color.
+ * Formula from WCAG 2.1: https://www.w3.org/TR/WCAG21/#dfn-relative-luminance
+ * @param r Red value (0-255)
+ * @param g Green value (0-255)
+ * @param b Blue value (0-255)
+ * @returns The relative luminance (0-1).
+ */
+export function getLuminance(r: number, g: number, b: number): number {
+  const a = [r, g, b].map((v) => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
+}
+
+/**
+ * Calculate the contrast ratio between two RGB colors.
+ * Formula from WCAG 2.1: https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio
+ * @param rgb1 First color as [r, g, b]
+ * @param rgb2 Second color as [r, g, b]
+ * @returns The contrast ratio.
+ */
+export function getContrastRatio(
+  rgb1: [number, number, number],
+  rgb2: [number, number, number]
+): number {
+  const lum1 = getLuminance(rgb1[0], rgb1[1], rgb1[2]);
+  const lum2 = getLuminance(rgb2[0], rgb2[1], rgb2[2]);
+  const brightest = Math.max(lum1, lum2);
+  const darkest = Math.min(lum1, lum2);
+  return (brightest + 0.05) / (darkest + 0.05);
+}
