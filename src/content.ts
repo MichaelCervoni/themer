@@ -1,29 +1,11 @@
-// Add this at the very top of the file
-console.log("THEMER CONTENT SCRIPT: Initial load at", new Date().toISOString(), window.location.href);
-
-// Verify browser.runtime is available
-console.log("THEMER CONTENT SCRIPT: browser.runtime available:", !!browser.runtime);
-
-// Add this code at the beginning of the file
-// This will run immediately when the script loads
-(function checkContentScriptExecution() {
-  console.log("CS: Content script initialized for", window.location.href);
-  // Send a simple ping to the background script to verify communication works
-  try {
-    browser.runtime.sendMessage({
-      type: "CONTENT_SCRIPT_LOADED",
-      url: window.location.href
-    }).catch(err => console.error("CS: Error sending initial message:", err));
-  } catch (e) {
-    console.error("CS: Error in initialization:", e);
-  }
-})();
-
 // content.ts - Runs in the context of web pages
 import type { ColorMap } from "./types";
 
 // Import dev console utilities (will be tree-shaken in production)
 import * as consoleUtils from './utils/console-utils';
+
+// At the very beginning of your content script, add:
+console.log("THEMER CONTENT SCRIPT: Script executing on " + window.location.href);
 
 // Define a type for the style properties we are tracking
 type TrackedStyleProperties = {
@@ -35,6 +17,21 @@ type TrackedStyleProperties = {
   borderBottomColor?: string;
   borderLeftColor?: string;
 };
+
+// Extend Window interface to inform TypeScript about custom properties
+declare global {
+  interface Window {
+    saveDevKey?: typeof consoleUtils.saveDevKey;
+    checkDevKey?: typeof consoleUtils.checkDevKey;
+    clearDevKey?: typeof consoleUtils.clearDevKey;
+    themer?: {
+      saveDevKey: typeof consoleUtils.saveDevKey;
+      checkDevKey: typeof consoleUtils.checkDevKey;
+      clearDevKey: typeof consoleUtils.clearDevKey;
+    };
+    themerDebug?: (msg: string, data?: any) => void;
+  }
+}
 
 const originalInlineStyles = new Map<HTMLElement, TrackedStyleProperties>();
 let currentObserver: MutationObserver | null = null;
@@ -69,9 +66,10 @@ function isDarkTheme(colorMap: ColorMap): boolean {
         }
       }
       
-      // Calculate brightness
+      // Calculate perceived brightness
       const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-      if (brightness < 80) { // Threshold for "dark" colors
+      if (brightness < 128) {
+        // Threshold for "dark" colors
         darkColorCount++;
       }
     } catch (e) {
@@ -127,7 +125,7 @@ function clearAppliedStyles() {
   isCurrentlyThemed = false;
 }
 
-function applyColorMap(colorMap: ColorMap): void {
+function applyColorMap(colorMap: ColorMap, semanticsFromBackground?: any): void {
   console.log(`CS (applyColorMap): Called. Received map with ${Object.keys(colorMap).length} keys.`);
   if (Object.keys(colorMap).length < 10 && Object.keys(colorMap).length > 0) {
     console.log("CS: Full colorMap:", colorMap);
@@ -169,44 +167,42 @@ function applyColorMap(colorMap: ColorMap): void {
     `);
 
     // Inside the isDarkMode condition in applyColorMap
-    if (isDarkMode) {
-      // After the existing html/body styles
-      cssRules.push(`
-        /* Dark mode fallbacks for text (catch black text not explicitly mapped) */
-        p, span, div, h1, h2, h3, h4, h5, h6, a, li, td, th, label, input, textarea {
-          color: ${lightText} !important;
-        }
-        
-        /* Handle search input text */
-        input[type="text"], input[type="search"], input:not([type]) {
-          color: ${lightText} !important;
-          background-color: #2A2A2A !important;
-        }
-        
-        /* Force contrast for links */
-        a:link, a:visited {
-          color: #8CB4FF !important;
-        }
-      `);
+    // After the existing html/body styles
+    cssRules.push(`
+      /* Dark mode fallbacks for text (catch black text not explicitly mapped) */
+      p, span, div, h1, h2, h3, h4, h5, h6, a, li, td, th, label, input, textarea {
+        color: ${lightText} !important;
+      }
+      
+      /* Handle search input text */
+      input[type="text"], input[type="search"], input:not([type]) {
+        color: ${lightText} !important;
+        background-color: #2A2A2A !important;
+      }
+      
+      /* Force contrast for links */
+      a:link, a:visited {
+        color: #8CB4FF !important;
+      }
+    `);
 
-      // Inside the isDarkMode condition in applyColorMap, after dark mode fallbacks
-      cssRules.push(`
-        /* CSS Variable overrides for dark mode */
-        :root {
-          --text-color: ${lightText} !important;
-          --body-color: ${lightText} !important;
-          --body-bg: ${darkBg} !important;
-          --bg-color: ${darkBg} !important;
-          --background: ${darkBg} !important;
-          --background-color: ${darkBg} !important;
-          
-          /* Material & Bootstrap variables */
-          --mat-background-color: ${darkBg} !important;
-          --bs-body-bg: ${darkBg} !important;
-          --bs-body-color: ${lightText} !important;
-        }
-      `);
-    }
+    // Inside the isDarkMode condition in applyColorMap, after dark mode fallbacks
+    cssRules.push(`
+      /* CSS Variable overrides for dark mode */
+      :root {
+        --text-color: ${lightText} !important;
+        --body-color: ${lightText} !important;
+        --body-bg: ${darkBg} !important;
+        --bg-color: ${darkBg} !important;
+        --background: ${darkBg} !important;
+        --background-color: ${darkBg} !important;
+        
+        /* Material & Bootstrap variables */
+        --mat-background-color: ${darkBg} !important;
+        --bs-body-bg: ${darkBg} !important;
+        --bs-body-color: ${lightText} !important;
+      }
+    `);
   }
   
   // Add a special section for transparent elements
@@ -222,6 +218,28 @@ function applyColorMap(colorMap: ColorMap): void {
           background-color: ${transparentMapping} !important;
         }
       `);
+    }
+  }
+  
+  // Add CSS variable overrides if the semantics contains varFallbacks
+  const varFallbacksToOverride = semanticsFromBackground?.varFallbacks || [];
+
+  if (varFallbacksToOverride.length > 0) {
+    let varOverrideCss = ':root {\n';
+    const overriddenVars = new Set<string>(); // To avoid duplicate overrides for the same variable
+
+    varFallbacksToOverride.forEach((item: {varName: string, fallbackColor: string}) => {
+      const mappedFallbackColor = colorMap[item.fallbackColor];
+      if (mappedFallbackColor && !overriddenVars.has(item.varName)) {
+        // Apply if the fallback was mapped
+        varOverrideCss += `  ${item.varName}: ${mappedFallbackColor} !important; /* Original fallback: ${item.fallbackColor} */\n`;
+        overriddenVars.add(item.varName);
+      }
+    });
+    varOverrideCss += '}';
+    if (overriddenVars.size > 0) {
+      cssRules.push(varOverrideCss);
+      console.log("CS: Added CSS variable overrides for fallbacks:", overriddenVars.size);
     }
   }
   
@@ -376,156 +394,284 @@ function collectColors(): string[] {
   return [...colors];
 }
 
-// Add after collectColors() function (around line 285)
-/**
- * Extract colors from all accessible stylesheets
- */
-function extractColorsFromStylesheets(): Set<string> {
-  const extractedColors = new Set<string>();
-  
-  try {
-    // Process all stylesheets
-    for (let i = 0; i < document.styleSheets.length; i++) {
-      try {
-        const sheet = document.styleSheets[i];
-        
-        // Skip cross-origin stylesheets we can't access
-        if (sheet.href && !sheet.href.startsWith(window.location.origin) && !sheet.href.startsWith('moz-extension://')) {
-          continue;
+interface ExtractedSheetData {
+  colorsToMap: Set<string>;
+  varFallbacks: Array<{varName: string, fallbackColor: string}>;
+}
+
+// Helper to identify if a string is a plausible color string (simplified)
+// Helper to identify if a string is a plausible color string (simplified)
+function isColorString(str: string | null | undefined): boolean {
+  if (!str) return false;
+  // Make sure str is actually a string before calling toLowerCase()
+  if (typeof str !== 'string') {
+    console.warn("THEMER: Non-string value passed to isColorString:", str);
+    return false;
+  }
+  const s = str.toLowerCase().trim();
+  if (s === 'transparent' || s === 'inherit' || s === 'initial' || s === 'currentcolor' || s.includes('var(')) return false;
+  return s.startsWith('#') || s.startsWith('rgb') || s.startsWith('hsl') || /^[a-z]+(-[a-z]+)*$/.test(s); // basic check for named colors too
+}
+
+// Extract colors from stylesheets with CSS variable fallbacks
+function extractColorsFromStylesheets(): ExtractedSheetData {
+  const colorsToMap = new Set<string>();
+  const varFallbacks: Array<{varName: string, fallbackColor: string}> = [];
+  // Regex to find var(name, fallback) or var(name)
+  // It captures the variable name and optionally the fallback.
+  const cssVarPattern = /var\(\s*(--[^,\s)]+)\s*(?:,\s*([^)]+))?\)/g;
+
+  // Convert StyleSheetList to an array to make it iterable
+  const styleSheetsArray = Array.from(document.styleSheets);
+
+  for (const sheet of styleSheetsArray) {
+    try {
+      // Prevent CORS errors for cross-origin stylesheets
+      if (sheet.href && !sheet.href.startsWith(window.location.origin) && !sheet.href.startsWith('blob:') && !sheet.href.startsWith('data:')) {
+        // Check if rules can be accessed, if not, skip
+        try {
+            // @ts-ignore
+            if (!sheet.cssRules && !sheet.rules) continue;
+        } catch (e) {
+            // console.warn(`CS: Cannot access rules in stylesheet: ${sheet.href}`, e);
+            continue;
         }
+      }
         
-        // Access and process the rules
-        const rules = sheet.cssRules || sheet.rules;
-        if (!rules) continue;
-        
-        for (let j = 0; j < rules.length; j++) {
-          const rule = rules[j];
-          
-          // Handle standard style rules
-          if (rule instanceof CSSStyleRule) {
-            const style = rule.style;
-            // Check all color-related properties
-            ['color', 'background-color', 'border-color', 'background'].forEach(prop => {
-              const value = style.getPropertyValue(prop);
-              if (value && !value.includes('var(') && value !== 'transparent' && value !== 'inherit' && value !== 'initial') {
-                extractedColors.add(value);
+      const rules = sheet.cssRules || sheet.rules;
+      if (!rules) continue;
+
+      // Convert CSSRuleList to an array before iterating
+      const rulesArray = Array.from(rules);
+
+      for (const rule of rulesArray) {
+        if (rule instanceof CSSStyleRule) {
+          const style = rule.style;
+          for (let k = 0; k < style.length; k++) {
+            const propName = style[k];
+            // Consider only color-related properties for efficiency
+            if (!propName.includes('color') && !propName.includes('background') && !propName.includes('border') && !propName.includes('shadow') && !propName.includes('fill') && !propName.includes('stroke')) {
+              continue;
+            }
+            const propValue = style.getPropertyValue(propName);
+
+            if (propValue) {
+              let match;
+              cssVarPattern.lastIndex = 0; // Reset regex state
+              let hasVar = false;
+              while ((match = cssVarPattern.exec(propValue)) !== null) {
+                hasVar = true;
+                const varName = match[1].trim();
+                const fallbackColor = match[2] ? match[2].trim() : null;
+
+                if (fallbackColor && isColorString(fallbackColor)) {
+                  colorsToMap.add(fallbackColor);
+                  // Avoid duplicates for the same var-fallback pair
+                  if (!varFallbacks.some(vf => vf.varName === varName && vf.fallbackColor === fallbackColor)) {
+                    varFallbacks.push({ varName, fallbackColor });
+                  }
+                }
               }
-            });
+
+              // If the property value is not a variable itself, or contains non-variable parts that are colors
+              if (!hasVar || (propValue.replace(cssVarPattern, '').trim() !== '')) {
+                // Attempt to parse direct colors if the value isn't solely a var() or complex expression
+                const potentialDirectColor = propValue.trim();
+                if (!potentialDirectColor.startsWith('var(') && isColorString(potentialDirectColor)) {
+                  colorsToMap.add(potentialDirectColor);
+                }
+              }
+            }
           }
         }
-      } catch (e) {
-        // CORS issues with external stylesheets are expected
       }
+    } catch (e) {
+      // console.warn("CS: Error processing stylesheet:", sheet.href, e);
     }
-  } catch (e) {
-    console.error("CS: Error extracting colors from stylesheets:", e);
   }
-  
-  return extractedColors;
+  return { colorsToMap, varFallbacks };
 }
 
 /**
  * Collect page colors with semantic information
  */
 function collectColorsWithSemantics(): {colors: string[], semantics: any} {
+  console.log("CS (collectColorsWithSemantics): Starting color and semantic collection.");
   const allColors = new Set<string>();
   const backgroundColors = new Set<string>();
   const textColors = new Set<string>();
-  const borderColors = new Set<string>();
-  const accentColors = new Set<string>();
-  const linkColors = new Set<string>();
+  const borderColors = new Set<string>(); // To be populated if specific border collection is added
+  const accentColors = new Set<string>(); // To be populated based on heuristics or specific elements
+  const linkColors = new Set<string>();   // To be populated from <a> tags
   const transparentColors = new Set<string>();
-  const trueBackgrounds = new Map<string, string>(); // Map transparent to actual colors
-  
-  // First get the base background colors
-  const htmlBgColor = getComputedStyle(document.documentElement).backgroundColor;
-  const bodyBgColor = getComputedStyle(document.body).backgroundColor;
-  
-  // Add HTML background (even if transparent)
-  allColors.add(htmlBgColor);
-  backgroundColors.add(htmlBgColor);
-  if (htmlBgColor === "transparent" || htmlBgColor === "rgba(0, 0, 0, 0)") {
-    transparentColors.add(htmlBgColor);
-    // For HTML, the true background is usually white
-    trueBackgrounds.set(htmlBgColor, "rgb(255, 255, 255)"); 
-  }
-  
-  // Add body background
-  allColors.add(bodyBgColor);
-  backgroundColors.add(bodyBgColor);
-  if (bodyBgColor === "transparent" || bodyBgColor === "rgba(0, 0, 0, 0)") {
-    transparentColors.add(bodyBgColor);
-    // Body's true background is the HTML background or white
-    const trueBodyBg = (htmlBgColor !== "transparent" && htmlBgColor !== "rgba(0, 0, 0, 0)") ? 
-                       htmlBgColor : "rgb(255, 255, 255)";
-    trueBackgrounds.set(bodyBgColor, trueBodyBg);
-  }
-  
-  // Sample important elements to find text/background relationships
+  const trueBackgrounds = new Map<string, string>(); // Map transparent original color string to actual visible background string
   const colorRelationships: { text: string; background: string; element: string; transparent: boolean }[] = [];
-  const importantElements = [
-    document.body,
-    ...Array.from(document.querySelectorAll('main, article, header, nav, .content, h1, h2, a, button, input, p')).slice(0, 30)
+
+  // 1. Get base HTML and body background colors
+  if (document.documentElement) {
+    const htmlStyle = getComputedStyle(document.documentElement);
+    const htmlBgColor = htmlStyle.backgroundColor;
+    if (isColorString(htmlBgColor)) {
+      allColors.add(htmlBgColor);
+      backgroundColors.add(htmlBgColor);
+      if (htmlBgColor === "transparent" || htmlBgColor === "rgba(0, 0, 0, 0)") {
+        transparentColors.add(htmlBgColor);
+        // For HTML, the true background is often effectively white or the browser default
+        trueBackgrounds.set(htmlBgColor, "rgb(255, 255, 255)");
+      }
+    }
+  }
+
+  if (document.body) {
+    const bodyStyle = getComputedStyle(document.body);
+    const bodyBgColor = bodyStyle.backgroundColor;
+    if (isColorString(bodyBgColor)) {
+      allColors.add(bodyBgColor);
+      backgroundColors.add(bodyBgColor);
+      if (bodyBgColor === "transparent" || bodyBgColor === "rgba(0, 0, 0, 0)") {
+        transparentColors.add(bodyBgColor);
+        const actualHtmlBg = document.documentElement ? getComputedStyle(document.documentElement).backgroundColor : "rgb(255, 255, 255)";
+        const trueBodyBg = (isColorString(actualHtmlBg) && actualHtmlBg !== "transparent" && actualHtmlBg !== "rgba(0, 0, 0, 0)")
+                           ? actualHtmlBg
+                           : "rgb(255, 255, 255)";
+        trueBackgrounds.set(bodyBgColor, trueBodyBg);
+      }
+    }
+  }
+
+  // 2. Sample important elements for text/background relationships and common colors
+  // Prioritize elements likely to define key color relationships
+  const selectorsForRelationships = [
+    'body', 'main', 'article', 'section', 'header', 'footer', 'nav', 'aside',
+    'h1', 'h2', 'h3', 'p', 'a', 'button', 'input[type="text"]', 'input[type="submit"]',
+    '.card', '.container', '.content', // Common layout classes
+    '[role="banner"]', '[role="main"]', '[role="navigation"]', '[role="contentinfo"]'
   ];
-  
-  importantElements.forEach(element => {
-    if (!(element instanceof HTMLElement)) return;
-    
+
+  const importantElements: HTMLElement[] = [];
+  selectorsForRelationships.forEach(selector => {
+    try {
+      document.querySelectorAll(selector).forEach(el => {
+        if (el instanceof HTMLElement && el.offsetParent !== null) { // Check if visible
+            importantElements.push(el);
+        }
+      });
+    } catch (e) {
+        // console.warn(`CS: Error selecting elements with "${selector}":`, e);
+    }
+  });
+  // Deduplicate and limit
+  const uniqueImportantElements = Array.from(new Set(importantElements)).slice(0, 50);
+
+  uniqueImportantElements.forEach(element => {
     const computedStyle = getComputedStyle(element);
     const textColor = computedStyle.color;
-    let bgColor = computedStyle.backgroundColor;
-    
-    // Add colors to collections
-    if (textColor) {
+    let originalBgColor = computedStyle.backgroundColor; // This is the element's own BG
+    let effectiveBgColor = originalBgColor; // This will be the true visible BG
+
+    let isTransparentBg = false;
+
+    if (isColorString(textColor)) {
       allColors.add(textColor);
       textColors.add(textColor);
+      if (element.tagName === 'A' && element.closest('nav, header, footer')) {
+        linkColors.add(textColor); // Simple heuristic for link colors
+      }
     }
-    
-    if (bgColor) {
-      allColors.add(bgColor);
-      backgroundColors.add(bgColor);
-      
-      // If transparent, find and store the true background
-      if (bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)") {
-        transparentColors.add(bgColor);
-        const trueBg = getActualBackgroundColor(element);
-        trueBackgrounds.set(bgColor, trueBg);
+
+    if (isColorString(originalBgColor)) {
+      allColors.add(originalBgColor);
+      backgroundColors.add(originalBgColor);
+
+      if (originalBgColor === "transparent" || originalBgColor === "rgba(0, 0, 0, 0)") {
+        isTransparentBg = true;
+        transparentColors.add(originalBgColor);
+        const trueBg = getActualBackgroundColor(element); // Recursive function to find visible BG
+        trueBackgrounds.set(originalBgColor, trueBg); // Map the "transparent" string to its actual underlying color
         
-        // Also add the true background to our color collection
-        allColors.add(trueBg);
-        backgroundColors.add(trueBg);
-        
-        // Use the true background for the relationship
-        bgColor = trueBg;
+        // Also add the true background to our color collection if it's a valid color
+        if (isColorString(trueBg)) {
+            allColors.add(trueBg);
+            backgroundColors.add(trueBg);
+        }
+        effectiveBgColor = trueBg; // Use the true background for the relationship
       }
     }
     
-    // Store the text/background relationship
-    if (textColor && bgColor) {
-      colorRelationships.push({
-        text: textColor,
-        background: bgColor,
-        element: element.tagName.toLowerCase(),
-        transparent: bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)"
-      });
+    // Add border colors from these important elements
+    const borderColor = computedStyle.borderColor; // This gets the shorthand
+    // For more specific borders, you'd check borderTopColor, borderRightColor, etc.
+    if (isColorString(borderColor) && borderColor !== textColor && borderColor !== effectiveBgColor) {
+        allColors.add(borderColor);
+        borderColors.add(borderColor);
+    }
+
+    // Store the text/background relationship using the effective background color
+    if (isColorString(textColor) && isColorString(effectiveBgColor)) {
+      // Avoid adding too many identical relationships from deeply nested similar elements
+      const relationshipExists = colorRelationships.some(
+        r => r.text === textColor && r.background === effectiveBgColor && r.element === element.tagName.toLowerCase()
+      );
+      if (!relationshipExists || colorRelationships.length < 5) { // Allow a few duplicates if list is short
+         colorRelationships.push({
+            text: textColor,
+            background: effectiveBgColor, // Use the resolved background
+            element: element.tagName.toLowerCase() + (element.id ? `#${element.id}` : '') + (element.className && typeof element.className === 'string' ? `.${element.className.split(' ').join('.')}` : ''),
+            transparent: isTransparentBg // Was the element's OWN background transparent?
+          });
+      }
     }
   });
-  
-  // Extract colors from stylesheets as before...
-  
-  // Return enhanced semantics with relationships and true backgrounds
-  return {
-    colors: Array.from(allColors),
-    semantics: {
-      backgroundColors: Array.from(backgroundColors),
-      textColors: Array.from(textColors),
-      borderColors: Array.from(borderColors),
-      accentColors: Array.from(accentColors),
-      linkColors: Array.from(linkColors),
-      transparentColors: Array.from(transparentColors),
-      trueBackgrounds: Object.fromEntries(trueBackgrounds),
-      relationships: colorRelationships.slice(0, 10)
+
+  // 3. Extract colors from stylesheets (including CSS variable fallbacks)
+  const sheetData = extractColorsFromStylesheets();
+  sheetData.colorsToMap.forEach(color => {
+    if (isColorString(color)) {
+      allColors.add(color);
+      // Heuristic: if a color from a stylesheet isn't already a known text/bg, it might be an accent/border
+      if (!textColors.has(color) && !backgroundColors.has(color) && !borderColors.has(color)) {
+        accentColors.add(color);
+      }
     }
+  });
+
+  // 4. Consolidate and build the semantics object
+  const finalSemantics = {
+    backgroundColors: Array.from(new Set([...backgroundColors, ...sheetData.colorsToMap.values()].filter(c => !textColors.has(c) || backgroundColors.has(c)))), // Prioritize as BG if ambiguous
+    textColors: Array.from(textColors),
+    borderColors: Array.from(borderColors),
+    accentColors: Array.from(accentColors), // Colors that weren't clearly text or main backgrounds
+    linkColors: Array.from(linkColors),
+    transparentColors: Array.from(transparentColors), // Original transparent strings
+    trueBackgrounds: Object.fromEntries(trueBackgrounds), // Map of transparent string to its resolved solid color string
+    relationships: colorRelationships.slice(0, 15), // Limit to a reasonable number for the prompt
+    varFallbacks: sheetData.varFallbacks || [] // From extractColorsFromStylesheets
+  };
+  
+  // Ensure all colors in semantic categories are also in allColors
+  Object.values(finalSemantics).forEach(category => {
+    if (Array.isArray(category)) {
+      category.forEach(color => {
+        if (isColorString(color as string)) allColors.add(color as string);
+      });
+    } else if (typeof category === 'object' && category !== null && !Array.isArray(category)) {
+        // For trueBackgrounds
+        Object.values(category).forEach(color => {
+             if (isColorString(color as string)) allColors.add(color as string);
+        });
+    }
+  });
+
+  const finalColorsArray = Array.from(allColors).filter(c => isColorString(c));
+  console.log(`CS (collectColorsWithSemantics): Collected ${finalColorsArray.length} unique valid colors. Relationships: ${finalSemantics.relationships.length}. VarFallbacks: ${finalSemantics.varFallbacks.length}.`);
+  if (finalColorsArray.length < 20) {
+    // console.log("CS: Final collected colors:", finalColorsArray);
+    // console.log("CS: Final semantics:", finalSemantics);
+  }
+
+  return {
+    colors: finalColorsArray,
+    semantics: finalSemantics
   };
 }
 
@@ -568,25 +714,66 @@ function getActualBackgroundColor(element: HTMLElement): string {
   return bgColor;
 }
 
-// Improve the message listener to be more robust
+// Replace your existing message listener with this enhanced version:
+let lastMessageProcessedTime = 0;
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   try {
+    // Track when we process messages to prevent duplicates
+    const now = Date.now();
+    if (now - lastMessageProcessedTime < 50 && message.type === "GET_COLORS") {
+      console.log(`THEMER: Duplicate ${message.type} message detected and ignored (${now - lastMessageProcessedTime}ms)`);
+      sendResponse({success: false, error: "Duplicate message"});
+      return true;
+    }
+    lastMessageProcessedTime = now;
+    
     console.log(`THEMER: Received message: ${message.type}`, message);
     
     if (message.type === "APPLY_MAP") {
       console.log(`THEMER: Applying color map with ${Object.keys(message.payload).length} colors`);
-      applyColorMap(message.payload);
+      applyColorMap(message.payload, message.semantics);
       sendResponse({success: true});
       return true;
     }
     
     if (message.type === "GET_COLORS") {
-      const colorInfo = collectColorsWithSemantics();
-      console.log("THEMER: Sending colors:", colorInfo.colors.length);
-      sendResponse({
-        colors: colorInfo.colors,
-        semantics: colorInfo.semantics
-      });
+      console.log("THEMER: Processing GET_COLORS request...");
+      
+      // Force indicator to show we're processing the request
+      if (window.location.hostname.includes('amazon')) {
+        const indicator = document.createElement('div');
+        indicator.id = 'themer-processing-indicator';
+        indicator.style.cssText = 'position:fixed;top:0;left:0;background:blue;color:white;padding:2px 5px;z-index:999999;font-size:10px;';
+        indicator.textContent = 'Themer Processing';
+        document.body ? document.body.appendChild(indicator) : document.documentElement.appendChild(indicator);
+      }
+      
+      try {
+        const colorInfo = collectColorsWithSemantics();
+        console.log("THEMER: Sending colors:", colorInfo.colors.length);
+        
+        // Remove the processing indicator if it exists
+        const indicator = document.getElementById('themer-processing-indicator');
+        if (indicator && indicator.parentNode) {
+          indicator.parentNode.removeChild(indicator);
+        }
+        
+        sendResponse({
+          colors: colorInfo.colors,
+          semantics: colorInfo.semantics
+        });
+      } catch (colorError) {
+        console.error("THEMER: Error collecting colors:", colorError);
+        sendResponse({success: false, error: `Error collecting colors: ${String(colorError)}`});
+      }
+      return true;
+    }
+    
+    // Added explicit detection for content script verification
+    if (message.type === "VERIFY_CONTENT_SCRIPT") {
+      console.log("THEMER: Content script verification requested");
+      verifyContentScriptRunning();
+      sendResponse({success: true, timestamp: Date.now()});
       return true;
     }
     
@@ -628,10 +815,10 @@ async function applyInitialTheme() {
     
     if (activeSettings && activeSettings.palette && Object.keys(activeSettings.palette).length > 0) {
       console.log(`CS (applyInitialTheme): Applying initial theme. Style: ${activeSettings.style}`);
-      applyColorMap(activeSettings.palette);
+      applyColorMap(activeSettings.palette, activeSettings.semantics);
     } else {
       console.log("CS (applyInitialTheme): No active theme found. Applying empty map.");
-      applyColorMap({}); 
+      applyColorMap({}, null); 
     }
   } catch (error) {
     console.error("CS (applyInitialTheme): Error:", error);
@@ -649,7 +836,8 @@ if (document.readyState === "loading") {
       const colorInfo = collectColorsWithSemantics();
       browser.runtime.sendMessage({ 
         type: "COLOR_SET", 
-        payload: colorInfo.colors 
+        payload: colorInfo.colors,
+        semantics: colorInfo.semantics
       }).catch(e => console.error("CS: Error sending COLOR_SET:", e));
     }
     applyInitialTheme();
@@ -660,7 +848,8 @@ if (document.readyState === "loading") {
     const colorInfo = collectColorsWithSemantics();
     browser.runtime.sendMessage({ 
       type: "COLOR_SET", 
-      payload: colorInfo.colors 
+      payload: colorInfo.colors, 
+      semantics: colorInfo.semantics
     }).catch(e => console.error("CS: Error sending COLOR_SET:", e));
   }
   applyInitialTheme();
@@ -675,10 +864,11 @@ try {
     console.log('[Themer] Running in development mode');
     
     // Expose useful development utilities
-    window.themer = window.themer || {};
-    window.themer.saveDevKey = consoleUtils.saveDevKey;
-    window.themer.checkDevKey = consoleUtils.checkDevKey;
-    window.themer.clearDevKey = consoleUtils.clearDevKey;
+    window.themer = {
+      saveDevKey: consoleUtils.saveDevKey,
+      checkDevKey: consoleUtils.checkDevKey,
+      clearDevKey: consoleUtils.clearDevKey
+    };
     
     console.log('[Themer] Development utilities available. Use window.themer.saveDevKey("your-key")');
   }
@@ -687,13 +877,14 @@ try {
   console.debug('[Themer] Could not initialize development utilities:', e);
 }
 
-// Themer Activity Indicator
-(function verifyContentScriptRunning() {
+// Verify the content script is running (for debugging)
+function verifyContentScriptRunning() {
+  console.log("THEMER CONTENT SCRIPT: verifyContentScriptRunning called");
   const indicator = document.createElement('div');
   indicator.id = 'themer-content-script-indicator';
   indicator.style.cssText = 'position:fixed;top:0;right:0;background:red;color:white;padding:2px 5px;z-index:999999;font-size:10px;';
   indicator.textContent = 'Themer Active';
-  document.documentElement.appendChild(indicator);
+  document.body ? document.body.appendChild(indicator) : document.documentElement.appendChild(indicator);
   
   // Hide after 5 seconds
   setTimeout(() => {
@@ -701,10 +892,14 @@ try {
       indicator.parentNode.removeChild(indicator);
     }
   }, 5000);
-})();
+}
 
-// Add this after your verifyContentScriptRunning function
+// Always run this on Amazon to confirm script loading
+if (window.location.hostname.includes('amazon')) {
+  setTimeout(verifyContentScriptRunning, 500);
+}
 
+// Enable debug mode for troubleshooting
 function enableDebugMode() {
   // Create debug overlay
   const debugPanel = document.createElement('div');
@@ -722,12 +917,18 @@ function enableDebugMode() {
     debugPanel.appendChild(logItem);
     
     // Keep only last 20 messages
-    while (debugPanel.childNodes.length > 21) {
-      debugPanel.removeChild(debugPanel.childNodes[1]);
+    while (debugPanel.childNodes.length > 21) { // Ensure there's always the "Themer Debug:" title
+      if (debugPanel.childNodes[1]) { // Check if the child exists before removing
+         debugPanel.removeChild(debugPanel.childNodes[1]);
+      } else {
+        break; // Should not happen if length > 21
+      }
     }
   };
   
-  window.themerDebug('Debug mode enabled');
+  if (window.themerDebug) { // Check if it was successfully assigned
+    window.themerDebug('Debug mode enabled');
+  }
 }
 
 // Enable with "?themer-debug=1" in URL
@@ -735,9 +936,10 @@ if (window.location.search.includes('themer-debug=1')) {
   setTimeout(enableDebugMode, 1000);
 }
 
-// Add to global window for debugging
-declare global {
-  interface Window {
-    themerDebug?: (msg: string, data?: any) => void;
+// Initial verification
+(function() {
+  console.log("CS: Content script initialization complete");
+  if (window.location.search.includes('themer-verify=1')) {
+    verifyContentScriptRunning();
   }
-}
+})();

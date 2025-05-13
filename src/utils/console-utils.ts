@@ -64,12 +64,14 @@ export async function clearDevKey(): Promise<void> {
 }
 
 // Make these functions available in the window object for console use
+// Changed the Window interface to match exactly between files
 declare global {
   interface Window {
-    saveDevKey: typeof saveDevKey;
-    checkDevKey: typeof checkDevKey;
-    clearDevKey: typeof clearDevKey;
-    themer: {
+    saveDevKey?: typeof saveDevKey;
+    checkDevKey?: typeof checkDevKey;
+    clearDevKey?: typeof clearDevKey;
+    // Use this exact same interface structure in content.ts
+    themer?: {
       saveDevKey: typeof saveDevKey;
       checkDevKey: typeof checkDevKey;
       clearDevKey: typeof clearDevKey;
@@ -79,11 +81,13 @@ declare global {
 
 // Always expose for development
 try {
-  // Use themer namespace to avoid polluting global scope
-  window.themer = window.themer || {};
-  window.themer.saveDevKey = saveDevKey;
-  window.themer.checkDevKey = checkDevKey;
-  window.themer.clearDevKey = clearDevKey;
+  // Create the themer object with all required properties at once
+  // Using type assertion to satisfy TypeScript
+  window.themer = {
+    saveDevKey,
+    checkDevKey,
+    clearDevKey
+  };
   
   // Also expose directly for convenience
   window.saveDevKey = saveDevKey;
